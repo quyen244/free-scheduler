@@ -121,3 +121,4 @@ Open an issue or submit a pull request. Star the repo to stay updated as new pla
 
 MIT License. See [LICENSE](LICENSE) for details.
 # free-scheduler
+# free-scheduler
