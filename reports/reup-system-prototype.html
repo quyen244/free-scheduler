@@ -1,0 +1,479 @@
+<div id="reup-pipeline-prototype">
+  <style>
+    #reup-pipeline-prototype {
+      color-scheme: light dark;
+      --rp-canvas: Canvas;
+      --rp-ink: CanvasText;
+      --rp-surface: Field;
+      --rp-surface-raised: ButtonFace;
+      --rp-muted: GrayText;
+      --rp-border: color-mix(in srgb, CanvasText 18%, Canvas);
+      --rp-active: AccentColor;
+      --rp-active-ink: AccentColorText;
+      --rp-complete: LinkText;
+      --rp-warning: Mark;
+      --rp-warning-ink: MarkText;
+      color: var(--rp-ink);
+      background: transparent;
+      width: 100%;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+    #reup-pipeline-prototype * { box-sizing: border-box; }
+    #reup-pipeline-prototype .rp-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    #reup-pipeline-prototype h2,
+    #reup-pipeline-prototype h3,
+    #reup-pipeline-prototype p { margin-top: 0; }
+    #reup-pipeline-prototype .rp-head p { margin: 4px 0 0; color: var(--rp-muted); }
+    #reup-pipeline-prototype .rp-controls { margin: 0; }
+    #reup-pipeline-prototype .rp-select-wrap { min-width: 230px; }
+    #reup-pipeline-prototype .rp-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 8px;
+    }
+    #reup-pipeline-prototype .rp-controls label {
+      display: grid;
+      gap: 5px;
+      color: var(--rp-muted);
+    }
+    #reup-pipeline-prototype .rp-controls select,
+    #reup-pipeline-prototype .rp-controls button {
+      min-height: 40px;
+      padding: 8px 11px;
+      border: 1px solid var(--rp-border);
+      border-radius: 8px;
+      background: var(--rp-surface);
+      color: var(--rp-ink);
+      font: inherit;
+    }
+    #reup-pipeline-prototype .rp-controls button { cursor: pointer; font-weight: 500; }
+    #reup-pipeline-prototype .rp-controls .btn-primary {
+      background: var(--rp-active);
+      border-color: var(--rp-active);
+      color: var(--rp-active-ink);
+    }
+    #reup-pipeline-prototype .rp-controls button:disabled { cursor: wait; opacity: 0.6; }
+    #reup-pipeline-prototype .rp-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, 0.34fr);
+      gap: 20px;
+      align-items: start;
+    }
+    #reup-pipeline-prototype .rp-flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(86px, 1fr));
+      gap: 14px;
+      align-items: stretch;
+      position: relative;
+    }
+    #reup-pipeline-prototype .rp-step {
+      appearance: none;
+      position: relative;
+      min-height: 112px;
+      padding: 13px 10px;
+      border: 1px solid var(--rp-border);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--rp-surface-raised) 72%, transparent);
+      color: var(--rp-ink);
+      text-align: left;
+      cursor: pointer;
+      transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+    }
+    #reup-pipeline-prototype .rp-step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      top: 31px;
+      left: calc(100% + 1px);
+      width: 15px;
+      border-top: 2px solid var(--rp-border);
+    }
+    #reup-pipeline-prototype .rp-step:not(:last-child)::before {
+      content: "";
+      position: absolute;
+      z-index: 1;
+      top: 27px;
+      left: calc(100% + 12px);
+      width: 7px;
+      height: 7px;
+      border-top: 2px solid var(--rp-border);
+      border-right: 2px solid var(--rp-border);
+      transform: rotate(45deg);
+    }
+    #reup-pipeline-prototype .rp-step[data-state="active"] {
+      border-color: var(--rp-active);
+      background: color-mix(in srgb, var(--rp-active) 14%, var(--rp-canvas));
+      transform: translateY(-3px);
+    }
+    #reup-pipeline-prototype .rp-step[data-state="completed"] {
+      border-color: var(--rp-complete);
+      background: color-mix(in srgb, var(--rp-complete) 10%, var(--rp-canvas));
+    }
+    #reup-pipeline-prototype .rp-step[data-state="failed"] {
+      border-color: var(--rp-ink);
+      background: repeating-linear-gradient(135deg, var(--rp-surface-raised), var(--rp-surface-raised) 8px, var(--rp-canvas) 8px, var(--rp-canvas) 16px);
+    }
+    #reup-pipeline-prototype .rp-step[data-state="blocked"] {
+      border-color: var(--rp-warning-ink);
+      background: var(--rp-warning);
+      color: var(--rp-warning-ink);
+    }
+    #reup-pipeline-prototype .rp-step[data-state="skipped"] { opacity: 0.55; }
+    #reup-pipeline-prototype .rp-step-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    #reup-pipeline-prototype .rp-index { color: var(--rp-muted); }
+    #reup-pipeline-prototype .rp-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--rp-muted);
+      flex: 0 0 auto;
+    }
+    #reup-pipeline-prototype [data-state="active"] .rp-dot { background: var(--rp-active); }
+    #reup-pipeline-prototype [data-state="completed"] .rp-dot { background: var(--rp-complete); }
+    #reup-pipeline-prototype [data-state="failed"] .rp-dot { background: var(--rp-ink); }
+    #reup-pipeline-prototype [data-state="blocked"] .rp-dot { background: var(--rp-warning-ink); }
+    #reup-pipeline-prototype .rp-label { display: block; font-weight: 500; }
+    #reup-pipeline-prototype .rp-owner {
+      display: block;
+      margin-top: 7px;
+      color: var(--rp-muted);
+    }
+    #reup-pipeline-prototype .rp-state {
+      display: block;
+      margin-top: 12px;
+      color: var(--rp-muted);
+      text-transform: capitalize;
+    }
+    #reup-pipeline-prototype .rp-panel,
+    #reup-pipeline-prototype .rp-summary {
+      padding: 16px;
+      border: 1px solid var(--rp-border);
+      border-radius: 12px;
+      background: var(--rp-surface);
+      color: var(--rp-ink);
+    }
+    #reup-pipeline-prototype .rp-panel h3 { margin-top: 0; }
+    #reup-pipeline-prototype .rp-detail-label { color: var(--rp-muted); margin-bottom: 4px; }
+    #reup-pipeline-prototype .rp-detail-value { margin: 0 0 14px; }
+    #reup-pipeline-prototype .rp-platforms {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    #reup-pipeline-prototype .rp-platform {
+      display: grid;
+      grid-template-columns: 76px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--rp-border);
+    }
+    #reup-pipeline-prototype .rp-platform:last-child { border-bottom: 0; }
+    #reup-pipeline-prototype .rp-platform-state { text-transform: capitalize; color: var(--rp-muted); }
+    #reup-pipeline-prototype .rp-mini-track {
+      height: 5px;
+      background: color-mix(in srgb, var(--rp-muted) 18%, transparent);
+      overflow: hidden;
+      border-radius: 999px;
+    }
+    #reup-pipeline-prototype .rp-mini-fill {
+      height: 100%;
+      width: 0;
+      background: var(--rp-active);
+      transition: width 280ms ease, background 180ms ease;
+    }
+    #reup-pipeline-prototype .rp-platform[data-state="completed"] .rp-mini-fill { background: var(--rp-complete); }
+    #reup-pipeline-prototype .rp-platform[data-state="failed"] .rp-mini-fill { background: var(--rp-ink); }
+    #reup-pipeline-prototype .rp-platform[data-state="blocked"] .rp-mini-fill { background: var(--rp-warning-ink); }
+    #reup-pipeline-prototype .rp-observe {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--rp-border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      color: var(--rp-muted);
+    }
+    #reup-pipeline-prototype .rp-observe strong { color: var(--rp-ink); font-weight: 500; }
+    #reup-pipeline-prototype .rp-summary { margin-top: 16px; }
+    #reup-pipeline-prototype .rp-summary[data-tone="success"] { border-color: var(--rp-complete); }
+    #reup-pipeline-prototype .rp-summary[data-tone="warning"] { border-color: var(--rp-warning-ink); }
+    #reup-pipeline-prototype .rp-summary[data-tone="failed"] { border-color: var(--rp-ink); }
+    #reup-pipeline-prototype .text-muted { color: var(--rp-muted); }
+    #reup-pipeline-prototype hr { border: 0; border-top: 1px solid var(--rp-border); }
+    @media (max-width: 820px) {
+      #reup-pipeline-prototype .rp-head { align-items: stretch; flex-direction: column; }
+      #reup-pipeline-prototype .rp-layout { grid-template-columns: 1fr; }
+      #reup-pipeline-prototype .rp-flow { grid-template-columns: repeat(3, 1fr); }
+      #reup-pipeline-prototype .rp-step:nth-child(3)::after,
+      #reup-pipeline-prototype .rp-step:nth-child(3)::before { display: none; }
+    }
+    @media (max-width: 480px) {
+      #reup-pipeline-prototype .rp-flow { grid-template-columns: 1fr; }
+      #reup-pipeline-prototype .rp-step { min-height: 88px; }
+      #reup-pipeline-prototype .rp-step::after,
+      #reup-pipeline-prototype .rp-step::before { display: none; }
+      #reup-pipeline-prototype .rp-controls { align-items: stretch; }
+      #reup-pipeline-prototype .rp-select-wrap { width: 100%; min-width: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #reup-pipeline-prototype .rp-step,
+      #reup-pipeline-prototype .rp-mini-fill { transition: none; }
+    }
+  </style>
+
+  <div class="rp-head">
+    <div>
+      <h2>Approval-to-publish system</h2>
+      <p>Mock workflow · choose a deterministic case and run it end to end</p>
+    </div>
+    <div class="viz-controls rp-controls">
+      <label class="form-label rp-select-wrap" for="rp-scenario">Scenario
+        <select class="form-select" id="rp-scenario">
+          <option value="happy">Approved · all platforms succeed</option>
+          <option value="comment-fail">Facebook comment fails</option>
+          <option value="rejected">Operator rejects in Telegram</option>
+          <option value="tiktok-blocked">TikTok draft export needs reconnect</option>
+        </select>
+      </label>
+      <button class="btn btn-primary" id="rp-start" type="button">Start workflow</button>
+      <button class="btn btn-ghost" id="rp-reset" type="button">Reset</button>
+    </div>
+  </div>
+
+  <div class="rp-layout">
+    <div>
+      <div class="rp-flow" aria-label="Automated publishing workflow">
+        <button class="rp-step" type="button" data-step="0" data-state="queued">
+          <span class="rp-step-top"><span class="rp-index">01</span><span class="rp-dot"></span></span>
+          <span class="rp-label">Render complete</span>
+          <span class="rp-owner">n8n + media services</span>
+          <span class="rp-state">queued</span>
+        </button>
+        <button class="rp-step" type="button" data-step="1" data-state="queued">
+          <span class="rp-step-top"><span class="rp-index">02</span><span class="rp-dot"></span></span>
+          <span class="rp-label">Review queue</span>
+          <span class="rp-owner">Next.js control plane</span>
+          <span class="rp-state">queued</span>
+        </button>
+        <button class="rp-step" type="button" data-step="2" data-state="queued">
+          <span class="rp-step-top"><span class="rp-index">03</span><span class="rp-dot"></span></span>
+          <span class="rp-label">Telegram decision</span>
+          <span class="rp-owner">Human approval</span>
+          <span class="rp-state">queued</span>
+        </button>
+        <button class="rp-step" type="button" data-step="3" data-state="queued">
+          <span class="rp-step-top"><span class="rp-index">04</span><span class="rp-dot"></span></span>
+          <span class="rp-label">Package targets</span>
+          <span class="rp-owner">1 whole + N chunks</span>
+          <span class="rp-state">queued</span>
+        </button>
+        <button class="rp-step" type="button" data-step="4" data-state="queued">
+          <span class="rp-step-top"><span class="rp-index">05</span><span class="rp-dot"></span></span>
+          <span class="rp-label">Publish fan-out</span>
+          <span class="rp-owner">Durable worker</span>
+          <span class="rp-state">queued</span>
+        </button>
+        <button class="rp-step" type="button" data-step="5" data-state="queued">
+          <span class="rp-step-top"><span class="rp-index">06</span><span class="rp-dot"></span></span>
+          <span class="rp-label">Audit outcome</span>
+          <span class="rp-owner">URLs + retries</span>
+          <span class="rp-state">queued</span>
+        </button>
+      </div>
+
+      <div class="rp-observe" aria-label="Observability lane">
+        <span><strong>Trace</strong> <span id="rp-trace">demo-7f3a</span></span>
+        <span><strong>Revision</strong> <span id="rp-revision">3</span></span>
+        <span><strong>Queue age</strong> <span id="rp-age">0s</span></span>
+        <span><strong>Attempts</strong> <span id="rp-attempts">0</span></span>
+        <span><strong>Approval</strong> <span id="rp-approval">pending</span></span>
+      </div>
+
+      <div class="card rp-summary" id="rp-summary" data-tone="neutral" aria-live="polite">
+        <strong>Ready to simulate</strong>
+        <div class="text-muted text-small">Demo source: mystery-video · one whole YouTube post + three Facebook chunks + three TikTok drafts.</div>
+      </div>
+    </div>
+
+    <aside class="card rp-panel" aria-live="polite">
+      <h3 id="rp-detail-title">Render complete</h3>
+      <div class="rp-detail-label text-small">Owner</div>
+      <p class="rp-detail-value" id="rp-detail-owner">n8n + media services</p>
+      <div class="rp-detail-label text-small">Evidence produced</div>
+      <p class="rp-detail-value" id="rp-detail-evidence">Manifest contains 1920×1080 and 1080×1920 files, checksums, duration, and warnings.</p>
+      <div class="rp-detail-label text-small">Durable state</div>
+      <p class="rp-detail-value" id="rp-detail-state">Waiting for a signed, idempotent render-complete event.</p>
+      <hr>
+      <div class="rp-detail-label text-small">Platform targets</div>
+      <div class="rp-platforms">
+        <div class="rp-platform" data-platform="youtube" data-state="queued">
+          <span>YouTube ×1</span><div class="rp-mini-track"><div class="rp-mini-fill"></div></div><span class="rp-platform-state">queued</span>
+        </div>
+        <div class="rp-platform" data-platform="facebook" data-state="queued">
+          <span>Facebook ×3</span><div class="rp-mini-track"><div class="rp-mini-fill"></div></div><span class="rp-platform-state">queued</span>
+        </div>
+        <div class="rp-platform" data-platform="tiktok" data-state="queued">
+          <span>TikTok ×3</span><div class="rp-mini-track"><div class="rp-mini-fill"></div></div><span class="rp-platform-state">queued</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    (() => {
+      const root = document.getElementById('reup-pipeline-prototype');
+      if (!root) return;
+      const steps = [...root.querySelectorAll('.rp-step')];
+      const platformRows = [...root.querySelectorAll('.rp-platform')];
+      const startButton = root.querySelector('#rp-start');
+      const resetButton = root.querySelector('#rp-reset');
+      const scenarioSelect = root.querySelector('#rp-scenario');
+      const summary = root.querySelector('#rp-summary');
+      const detailTitle = root.querySelector('#rp-detail-title');
+      const detailOwner = root.querySelector('#rp-detail-owner');
+      const detailEvidence = root.querySelector('#rp-detail-evidence');
+      const detailState = root.querySelector('#rp-detail-state');
+      const approval = root.querySelector('#rp-approval');
+      const attempts = root.querySelector('#rp-attempts');
+      const age = root.querySelector('#rp-age');
+      let timers = [];
+      let selectedStep = 0;
+
+      const details = [
+        ['Render complete', 'n8n + media services', 'Manifest contains one whole 1920×1080 file and three 1080×1920 chunk files, with checksums, durations, and warnings.', 'A signed event is upserted by source video ID and render revision.'],
+        ['Review queue', 'Next.js control plane', 'Rights status, previews, captions, product snapshot, target accounts, and warnings are visible.', 'Campaign revision 3 is READY_FOR_REVIEW; an outbox event owns notification delivery.'],
+        ['Telegram decision', 'Human approval', 'One MVP approval authorizes the whole campaign: YouTube whole video, all Facebook chunks, and all TikTok drafts for the selected accounts.', 'A one-use opaque token binds the operator, chat, campaign, revision, and expiry. Any edit creates revision 4 and invalidates it.'],
+        ['Package targets', 'Campaign process manager', 'YouTube receives one whole 16:9 asset; Facebook and TikTok each receive all three 9:16 chunks.', 'Seven independent PublishTarget rows are created for one account on each platform.'],
+        ['Publish fan-out', 'Durable publisher worker', 'Per-account leases, idempotency keys, external job IDs, rate limits, and retries are recorded.', 'Successful uploads are never repeated just because another platform or child action fails.'],
+        ['Audit outcome', 'Control plane + outbox', 'Platform URLs, attempts, timings, comment result, and errors appear in one trace.', 'Campaign status is derived from target and post-action states: published, partial success, or failed.']
+      ];
+
+      const presets = {
+        happy: {
+          stepStates: ['completed','completed','completed','completed','completed','completed'],
+          platforms: { youtube: 'completed', facebook: 'completed', tiktok: 'completed' },
+          approval: 'approved', attempts: '10', tone: 'success',
+          title: 'Published on all selected targets',
+          note: 'One whole YouTube video published · three Facebook chunks and affiliate photo-comments posted · three TikTok drafts exported.'
+        },
+        'comment-fail': {
+          stepStates: ['completed','completed','completed','completed','completed','blocked'],
+          platforms: { youtube: 'completed', facebook: 'failed', tiktok: 'completed' },
+          approval: 'approved', attempts: '11', tone: 'warning',
+          title: 'Partial success — video is safe',
+          note: 'Three Facebook chunk videos published, but one photo-comment failed. Retry only that child comment action; do not upload its video again.'
+        },
+        rejected: {
+          stepStates: ['completed','completed','failed','skipped','skipped','completed'],
+          platforms: { youtube: 'skipped', facebook: 'skipped', tiktok: 'skipped' },
+          approval: 'rejected', attempts: '0', tone: 'failed',
+          title: 'Stopped by the operator',
+          note: 'No PublishTarget was created and no platform API was called. The rejection remains in the audit timeline.'
+        },
+        'tiktok-blocked': {
+          stepStates: ['completed','completed','completed','completed','blocked','blocked'],
+          platforms: { youtube: 'completed', facebook: 'completed', tiktok: 'blocked' },
+          approval: 'approved', attempts: '3', tone: 'warning',
+          title: 'Partial success — TikTok gated',
+          note: 'YouTube and Facebook completed. TikTok draft export was blocked before upload because the selected account needs reconnection.'
+        }
+      };
+
+      function clearTimers() {
+        timers.forEach(window.clearTimeout);
+        timers = [];
+      }
+
+      function setStepState(index, state) {
+        const step = steps[index];
+        step.dataset.state = state;
+        step.querySelector('.rp-state').textContent = state.replace('_', ' ');
+      }
+
+      function setPlatformState(name, state) {
+        const row = root.querySelector(`[data-platform="${name}"]`);
+        row.dataset.state = state;
+        row.querySelector('.rp-platform-state').textContent = state;
+        const width = state === 'queued' || state === 'skipped' ? '0%' : state === 'active' ? '55%' : '100%';
+        row.querySelector('.rp-mini-fill').style.width = width;
+      }
+
+      function showDetail(index) {
+        selectedStep = index;
+        const item = details[index];
+        detailTitle.textContent = item[0];
+        detailOwner.textContent = item[1];
+        detailEvidence.textContent = item[2];
+        detailState.textContent = item[3];
+      }
+
+      function reset() {
+        clearTimers();
+        steps.forEach((_, index) => setStepState(index, 'queued'));
+        platformRows.forEach(row => setPlatformState(row.dataset.platform, 'queued'));
+        approval.textContent = 'pending';
+        attempts.textContent = '0';
+        age.textContent = '0s';
+        summary.dataset.tone = 'neutral';
+        summary.innerHTML = '<strong>Ready to simulate</strong><div class="text-muted text-small">Demo source: mystery-video · one whole YouTube post + three Facebook chunks + three TikTok drafts.</div>';
+        startButton.disabled = false;
+        scenarioSelect.disabled = false;
+        showDetail(0);
+      }
+
+      function run() {
+        reset();
+        startButton.disabled = true;
+        scenarioSelect.disabled = true;
+        const preset = presets[scenarioSelect.value];
+        let elapsed = 0;
+        steps.forEach((_, index) => {
+          timers.push(window.setTimeout(() => {
+            if (index > 0 && steps[index - 1].dataset.state === 'active') {
+              setStepState(index - 1, preset.stepStates[index - 1]);
+            }
+            setStepState(index, 'active');
+            showDetail(index);
+            age.textContent = `${index * 2}s`;
+            if (index === 2) approval.textContent = preset.approval === 'rejected' ? 'deciding' : 'checking revision';
+            if (index === 4 && preset.approval !== 'rejected') {
+              Object.keys(preset.platforms).forEach(name => setPlatformState(name, 'active'));
+            }
+          }, elapsed));
+          elapsed += 620;
+        });
+        timers.push(window.setTimeout(() => {
+          steps.forEach((_, index) => setStepState(index, preset.stepStates[index]));
+          Object.entries(preset.platforms).forEach(([name, state]) => setPlatformState(name, state));
+          approval.textContent = preset.approval;
+          attempts.textContent = preset.attempts;
+          age.textContent = '11s';
+          summary.dataset.tone = preset.tone;
+          summary.innerHTML = `<strong>${preset.title}</strong><div class="text-muted text-small">${preset.note}</div>`;
+          startButton.disabled = false;
+          scenarioSelect.disabled = false;
+        }, elapsed + 350));
+      }
+
+      steps.forEach((step, index) => step.addEventListener('click', () => showDetail(index)));
+      startButton.addEventListener('click', run);
+      resetButton.addEventListener('click', reset);
+      reset();
+    })();
+  </script>
+</div>
