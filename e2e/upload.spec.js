@@ -2,10 +2,10 @@
 //
 // Flow:
 // 1. Load workspace at http://localhost:3000 — NO app login required.
-// 2. Verify YouTube account appears (from stored Google OAuth row).
-//    If Google session expired / refresh token missing, open /login,
-//    PAUSE for the user's manual Google sign-in (we NEVER touch the password),
-//    then persist storageState for reruns.
+// 2. Verify a YouTube account exists (google Account row in DB). If missing,
+//    PAUSE: user authorizes at /login in their NORMAL browser (Google blocks
+//    sign-in inside automation Chromium — "This browser or app may not be
+//    secure"). We NEVER touch the password. Poll /api/social/accounts.
 // 3. Upload the real video via the app's own upload endpoint + form.
 // 4. Submit post → app publishes to YouTube via resumable upload.
 // 5. Capture videoId/publishedUrl; verify via oEmbed + watch page.
@@ -23,61 +23,60 @@ const STATE_FILE = path.join(AUTH_DIR, "state.json");
 const RESULT_FILE = path.join(__dirname, "result.json");
 const TITLE_PREFIX = "[E2E Local Test]";
 
-async function ensureGoogleAuth(page, context) {
-  // A valid NextAuth client session (from persisted storageState on reruns)
-  // means Google OAuth is already authorized — skip the manual step.
-  const sessRes = await page.request.get(APP + "/api/auth/session");
-  const sess = await sessRes.json().catch(() => ({}));
-  if (sess?.user) {
-    console.log("Existing Google session valid — skipping manual auth.");
+async function ensureYouTubeAccount(page) {
+  // The publish path resolves the google Account row from the DB (local-mode
+  // tier 2) — a live session cookie is NOT required for uploads. Google also
+  // BLOCKS sign-in inside automation-controlled Chromium ("This browser or
+  // app may not be secure"), so authorization MUST happen in the user's
+  // normal browser. This test detects it via the accounts API.
+  const hasYouTube = async () => {
+    try {
+      const res = await page.request.get(APP + "/api/social/accounts");
+      const accounts = await res.json().catch(() => []);
+      return (accounts || []).some((a) => a.platform_name === "youtube");
+    } catch (e) {
+      return false;
+    }
+  };
+
+  if (await hasYouTube()) {
+    console.log("YouTube account found in DB — no sign-in needed.");
     return;
   }
 
-  // No valid session → fresh Google consent required (DB tokens may be expired
-  // or missing a refresh token). User completes sign-in themselves.
-  await page.goto(APP + "/login?callbackUrl=" + encodeURIComponent(APP + "/integrations"));
-  await page.waitForLoadState("networkidle");
-
   console.log("\n=====================================================");
-  console.log("ACTION REQUIRED: Google authentication needed.");
-  console.log("Complete the sign-in in the opened browser window.");
-  console.log("The test NEVER reads your password — you type it yourself.");
+  console.log("ACTION REQUIRED: Google authorization needed.");
+  console.log("Google BLOCKS sign-in inside automated browsers, and the");
+  console.log("test now runs headless (no window) — so authorize in");
+  console.log("your NORMAL Chrome window:");
+  console.log("");
+  console.log("  1. Open  http://localhost:3000/login");
+  console.log("  2. Click 'Authorize with Google' + complete sign-in");
+  console.log("     (if 'unverified app' shown → Advanced → continue)");
+  console.log("  3. Return here — test continues automatically");
   console.log("=====================================================\n");
 
-  const authBtn = page.locator("button:has-text('Authorize with Google')");
-  await authBtn.click();
-
-  // Wait (up to 2 hours) for the NextAuth session to become REAL.
-  // Poll /api/auth/session — it stays {} until the user finishes Google sign-in
-  // and the OAuth callback lands. waitForURL is unusable here: the current
-  // /login URL already matches any app glob pattern.
-  const deadline = Date.now() + 7_200_000;
-  let signedIn = false;
+  const deadline = Date.now() + 3_600_000; // 1 hour
   while (Date.now() < deadline) {
-    if (page.isClosed()) throw new Error("Browser closed before sign-in completed");
-    try {
-      const sessRes = await page.request.get(APP + "/api/auth/session");
-      const sess = await sessRes.json().catch(() => ({}));
-      if (sess?.user?.email) {
-        signedIn = true;
-        break;
-      }
-    } catch (e) {
-      /* server may 401/timeout mid-flight; keep polling */
+    if (await hasYouTube()) {
+      console.log("Google authorization detected — continuing.");
+      return;
     }
-    await page.waitForTimeout(2000);
+    await new Promise((r) => setTimeout(r, 3000));
   }
-  if (!signedIn) throw new Error("Timed out waiting for Google sign-in (2 hours)");
-
-  console.log("Google sign-in complete.");
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-  await context.storageState({ path: STATE_FILE });
+  throw new Error(
+    "Timed out waiting for Google authorization (1 hour) — complete sign-in at http://localhost:3000/login in your normal browser."
+  );
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: false });
+  // Headless: the ONLY visible Chrome on the user's screen is their real one,
+  // which is where Google authorization must happen (Google blocks automation
+  // browsers — "This browser or app may not be secure"). A visible test window
+  // invites the user to sign in inside the blocked browser by mistake.
+  const browser = await chromium.launch({ headless: true });
   const contextOpts = { acceptDownloads: true };
-  if (fs.existsSync(STATE_FILE)) contextOpts.storageState = STATE_FILE;
+  // storageState is optional now — publish auth comes from the DB Account row.
   const context = await browser.newContext(contextOpts);
   const page = await context.newPage();
 
@@ -94,8 +93,9 @@ async function ensureGoogleAuth(page, context) {
   }
   console.log("Step 1 OK: workspace loads without app login.");
 
-  // Step 2 — ensure Google auth (may pause for manual sign-in)
-  await ensureGoogleAuth(page, context);
+  // Step 2 — ensure Google auth (user authorizes in their NORMAL browser;
+  // this poll detects the resulting DB row via the accounts API)
+  await ensureYouTubeAccount(page);
 
   // Step 3 — back to workspace, select platform + channel
   await page.goto(APP + "/");
@@ -159,9 +159,11 @@ async function ensureGoogleAuth(page, context) {
     throw new Error("FAIL: post did not complete. Error: " + (post?.error || "timeout"));
   }
 
-  // Persist auth state for reruns
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
-  await context.storageState({ path: STATE_FILE });
+  // Persist auth state for reruns (session cookie only; publish uses DB row)
+  if (context) {
+    fs.mkdirSync(AUTH_DIR, { recursive: true });
+    await context.storageState({ path: STATE_FILE });
+  }
 
   // Step 5 — verify YouTube actually accepted the video
   const watchUrl = post.publishedUrl;

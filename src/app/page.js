@@ -38,6 +38,11 @@ const SOCIAL_PLATFORMS = [
   { key: "pinterest", name: "Pinterest Pin", Icon: FaPinterest, iconColor: "text-red-600", active: false },
 ];
 
+// Auth-type publish failures are fixable by re-running Google consent
+// (new refresh token lands in the DB). Everything else is a real error.
+const isAuthError = (text) =>
+  /refresh token|authorization|sign in|oauth|invalid_grant|expired/i.test(text || "");
+
 export default function WorkspaceDashboard() {
   const { data: session, update: updateSession } = useSession();
   const [accounts, setAccounts] = useState([]);
@@ -71,6 +76,10 @@ export default function WorkspaceDashboard() {
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Auth-fix banner: shown when a publish fails with a token/authorization
+  // error — the fix is re-running Google consent, so surface a button for it.
+  const [authError, setAuthError] = useState(null);
 
   // Custom Dropdowns Open State
   const [platformDropdownOpen, setPlatformDropdownOpen] = useState(false);
@@ -236,8 +245,15 @@ export default function WorkspaceDashboard() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "Submission failed");
+        if (isAuthError(data.error)) {
+          setAuthError(data.error);
+        } else {
+          throw new Error(data.error || "Submission failed");
+        }
+        return;
       }
+
+      setAuthError(null);
 
       // Reset form variables
       setTitle("");
@@ -246,7 +262,7 @@ export default function WorkspaceDashboard() {
       setMediaUrl("");
       setIsScheduled(false);
       setScheduledAt("");
-      
+
       // Refresh posts list
       fetchPosts();
       alert(isScheduled ? "Post scheduled successfully!" : "Publishing job started!");
@@ -319,6 +335,38 @@ export default function WorkspaceDashboard() {
           <h2 className="text-xl font-bold tracking-tight text-white">Create New Post</h2>
           <p className="text-xs text-zinc-400">Upload your video and schedule it to publish on connected channels.</p>
         </div>
+
+        {/* YouTube auth fix banner — shown when publish fails on tokens/authorization */}
+        {authError && (
+          <div className="flex flex-col gap-2 p-3 bg-red-500/5 border border-red-500/20 rounded-xl animate-fade-in">
+            <div className="flex items-start gap-2">
+              <FaExclamationTriangle className="text-red-400 text-sm shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className="text-xs font-bold text-red-300">YouTube authorization problem</span>
+                <span className="text-[10px] text-zinc-400 leading-relaxed break-words">{authError}</span>
+                <span className="text-[10px] text-zinc-500">
+                  Fix: re-run Google consent below, then submit the post again.
+                </span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => window.location.href = "/login?callbackUrl=" + encodeURIComponent(window.location.origin + "/")}
+                className="px-3 py-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-bold text-[10px] rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <FaYoutube className="text-xs" /> Reconnect YouTube
+              </button>
+              <button
+                type="button"
+                onClick={() => setAuthError(null)}
+                className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 font-bold text-[10px] rounded-lg transition-colors cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Platform Selection (Custom Dropdown) */}
         <div className="flex flex-col gap-1.5 animate-fade-in relative z-50">
@@ -988,6 +1036,15 @@ export default function WorkspaceDashboard() {
                     )}
                     {post.status === "failed" && (
                       <>
+                        {post.platform === "youtube" && isAuthError(post.error) && (
+                          <button
+                            onClick={() => window.location.href = "/login?callbackUrl=" + encodeURIComponent(window.location.origin + "/")}
+                            className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/5 rounded transition-colors text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                            title="Re-run Google consent to refresh YouTube authorization"
+                          >
+                            <FaYoutube /> Reconnect YouTube
+                          </button>
+                        )}
                         <button
                           onClick={() => handleRetryPost(post)}
                           className="p-1.5 text-zinc-400 hover:text-violet-400 hover:bg-violet-500/5 rounded transition-colors text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
