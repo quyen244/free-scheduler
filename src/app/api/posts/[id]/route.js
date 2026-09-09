@@ -10,7 +10,8 @@ export async function DELETE(req, { params }) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
-    const { id } = params;
+    // Next 16: params is a Promise
+    const { id } = await params;
     const post = await prisma.scheduledPost.findUnique({
       where: { id }
     });
@@ -43,7 +44,8 @@ export async function PATCH(req, { params }) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
-    const { id } = params;
+    // Next 16: params is a Promise
+    const { id } = await params;
     const body = await req.json();
 
     const post = await prisma.scheduledPost.findUnique({

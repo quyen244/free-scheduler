@@ -19,13 +19,14 @@ export async function GET(req) {
     // This keeps local YouTube publishing independent from MuAPI credits.
     const googleAccount = await prisma.account.findFirst({
       where: { userId: session.user.id, provider: "google" },
+      include: { user: true },
     });
     if (googleAccount) {
       accounts.push({
         id: 1,
         platform: 1,
         platform_name: "youtube",
-        account_name: session.user.name || email,
+        account_name: googleAccount.user.youtubeLabel || session.user.name || email,
         platform_user_id: googleAccount.providerAccountId,
         connected_at: googleAccount.id,
       });

@@ -102,12 +102,6 @@ export default function IntegrationsPage() {
   const [requesting, setRequesting] = useState(null);
 
   useEffect(() => {
-    // Fetch interest counts from MuAPI public endpoint
-    fetch("https://api.muapi.ai/api/social/integration-interest-counts")
-      .then((res) => res.json())
-      .then((data) => setInterestCounts(data || {}))
-      .catch(() => {});
-    
     // Load requested platforms from localStorage
     const localRequested = localStorage.getItem("requested_platforms");
     if (localRequested) {
@@ -120,12 +114,9 @@ export default function IntegrationsPage() {
   }, []);
 
   useEffect(() => {
-    if (session?.user) {
-      fetchAccounts();
-    } else {
-      setLoading(false);
-    }
-  }, [session]);
+    // Local mode: server resolves the user, no app sign-in required.
+    fetchAccounts();
+  }, []);
 
   const fetchAccounts = () => {
     setLoading(true);
@@ -135,12 +126,12 @@ export default function IntegrationsPage() {
         const fetchedAccounts = Array.isArray(data) ? data : [];
         setAccounts(fetchedAccounts);
         
-        // Auto-rename YouTube account if there's a pending label
+        // Auto-rename YouTube account if there's a pending label (local mode:
+        // after Google OAuth callback, rename the single connected YouTube account)
         const pendingYoutubeLabel = localStorage.getItem("pending_youtube_label");
-        if (pendingYoutubeLabel && session?.user?.email) {
-          const email = session.user.email;
+        if (pendingYoutubeLabel) {
           const targetAccount = fetchedAccounts.find(
-            (acc) => acc.platform === 1 && acc.account_name === email
+            (acc) => acc.platform === 1 && !localStorage.getItem("renamed_" + acc.id)
           );
           if (targetAccount) {
             fetch(`/api/social/accounts/${targetAccount.id}`, {
@@ -169,10 +160,6 @@ export default function IntegrationsPage() {
   };
 
   const handleConnect = (platform) => {
-    if (!session) {
-      signIn("google");
-      return;
-    }
     setAccountNameInput("");
     setConnectingPlatform(platform);
   };
@@ -282,13 +269,6 @@ export default function IntegrationsPage() {
         [platform.name]: (prev[platform.name] || 0) + 1
       }));
 
-      // Call MuAPI (ignore errors due to session auth requirement)
-      await fetch("https://api.muapi.ai/api/social/integration-interest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform_name: platform.name })
-      }).catch(() => {});
-
       alert(`Got it! We'll notify you when ${platform.name} is ready.`);
     } catch (err) {
       console.error(err);
@@ -362,48 +342,19 @@ export default function IntegrationsPage() {
         <div className="flex flex-col gap-2 w-full border-b border-zinc-900 pb-6">
           <div className="flex items-center justify-between gap-4">
             <h1 className="text-3xl font-bold tracking-tight text-white">Integrations</h1>
-            {session?.user && (
-              <button
-                onClick={fetchAccounts}
-                disabled={loading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
-              >
-                <FiRefreshCw className={loading ? "animate-spin" : ""} />
-                Refresh
-              </button>
-            )}
-          </div>
-          <p className="text-xs text-zinc-400">
-            Connect your social media accounts to publish content directly from MuAPI.
-          </p>
-          <a
-            href="https://muapi.ai/docs/social-publishing#social-publishing"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="self-start text-xs text-violet-400 hover:underline font-semibold mt-1"
-          >
-            Add social media scheduling to your apps →
-          </a>
-        </div>
-
-        {/* Guest Warning alert */}
-        {!session?.user && (
-          <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <FiAlertTriangle className="text-amber-500 text-lg shrink-0" />
-              <div className="flex flex-col gap-0.5">
-                <span className="text-xs font-bold text-amber-500">Sign in required</span>
-                <span className="text-[11px] text-zinc-400">Connect your channels to schedule posts by logging in.</span>
-              </div>
-            </div>
             <button
-              onClick={() => signIn("google")}
-              className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-bold text-[11px] rounded-lg transition-colors"
+              onClick={fetchAccounts}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
             >
-              Sign In
+              <FiRefreshCw className={loading ? "animate-spin" : ""} />
+              Refresh
             </button>
           </div>
-        )}
+          <p className="text-xs text-zinc-400">
+            Connect your social media accounts to publish content directly from this app. Runs locally — no SaaS account required.
+          </p>
+        </div>
 
         {/* Platforms list */}
         <div className="flex flex-col gap-6">
@@ -437,8 +388,7 @@ export default function IntegrationsPage() {
                   {!comingSoon ? (
                     <button
                       onClick={() => handleConnect(platform)}
-                      disabled={!session}
-                      className="px-3.5 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 text-zinc-950 text-xs font-semibold rounded-lg shadow-md transition-colors flex items-center gap-1 cursor-pointer"
+                      className="px-3.5 py-2 bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold rounded-lg shadow-md transition-colors flex items-center gap-1 cursor-pointer"
                     >
                       <FiPlus /> Connect
                     </button>
@@ -466,7 +416,7 @@ export default function IntegrationsPage() {
                 </div>
 
                 {/* Account list section */}
-                {!comingSoon && session && (
+                {!comingSoon && (
                   <div className="border-t border-zinc-900 pt-4 flex flex-col gap-2">
                     {loading ? (
                       <div className="h-10 w-full bg-zinc-900/60 rounded-lg animate-pulse" />

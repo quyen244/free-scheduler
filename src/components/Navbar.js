@@ -38,7 +38,7 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-50 w-full glass-panel border-b border-divider/50 shadow-md">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-        
+
         {/* Logo and Brand Title (Visible at all times) */}
         <Link href="/" className="flex items-center gap-2 transition-transform hover:scale-[1.02] active:scale-95">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-white font-extrabold text-lg shadow-md shadow-primary/30">
@@ -70,10 +70,9 @@ export default function Navbar() {
           })}
         </nav>
 
-        {/* Desktop Actions Section */}
+        {/* Desktop Actions Section — Google account menu (YouTube OAuth state only, not an app login) */}
         <div className="hidden md:flex items-center gap-4">
-          
-          {status === "authenticated" ? (
+          {status === "authenticated" && (
             <div className="flex items-center">
               {/* Profile Menu Toggle */}
               <div className="relative">
@@ -100,23 +99,16 @@ export default function Navbar() {
                       {session.user.email}
                     </div>
                     <button
-                      onClick={() => signOut({ callbackUrl: "/login" })}
+                      onClick={() => signOut({ callbackUrl: "/" })}
                       className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-semibold text-red-500 hover:bg-red-500/10 transition-colors"
                     >
                       <FiLogOut size={14} />
-                      <span>Sign Out</span>
+                      <span>Disconnect Google</span>
                     </button>
                   </div>
                 )}
               </div>
             </div>
-          ) : (
-            <Link
-              href="/login"
-              className="bg-primary text-white px-5 py-1.5 rounded-full text-sm font-bold hover:bg-primary-hover transition-all shadow-md shadow-primary/20"
-            >
-              Sign In
-            </Link>
           )}
         </div>
 
@@ -150,27 +142,17 @@ export default function Navbar() {
               </Link>
             ))}
 
-            <div className="h-px bg-divider/50 my-2" />
-
-            {status === "authenticated" ? (
+            {status === "authenticated" && (
               <button
                 onClick={() => {
                   setIsOpen(false);
-                  signOut({ callbackUrl: "/login" });
+                  signOut({ callbackUrl: "/" });
                 }}
                 className="flex w-full items-center justify-center gap-2 rounded bg-red-500/10 text-red-500 py-3 text-sm font-bold hover:bg-red-500/20 transition-all border border-red-500/20 mt-2"
               >
                 <FiLogOut size={16} />
-                <span>Sign Out</span>
+                <span>Disconnect Google</span>
               </button>
-            ) : (
-              <Link
-                href="/login"
-                onClick={() => setIsOpen(false)}
-                className="flex w-full items-center justify-center rounded bg-primary text-white py-3 text-sm font-bold hover:bg-primary-hover transition-all shadow-md shadow-primary/20 mt-2"
-              >
-                Sign In
-              </Link>
             )}
           </nav>
         </div>

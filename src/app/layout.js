@@ -4,30 +4,24 @@ import { Providers } from "./providers";
 import Navbar from "../components/Navbar";
 import config from "@/lib/config";
 
-const inter = Inter({ 
-  variable: "--font-inter", 
-  subsets: ["latin"], 
-  display: "swap" 
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  display: "swap"
 });
 
 export const metadata = {
-  title: "Free AI Social Media Scheduler - MuAPI",
-  description: "Schedule and publish AI-generated videos directly to YouTube and TikTok.",
+  title: "Free AI Social Media Scheduler - Local",
+  description: "Schedule and publish AI-generated videos directly to YouTube. Runs fully locally.",
 };
 
 export default function RootLayout({ children }) {
   const theme = config?.theme || "slate-indigo";
-  const localSession = config?.auth?.localMode
-    ? {
-        user: { name: "Local User", email: config.auth.localUserEmail || "local@localhost" },
-        expires: "2099-01-01T00:00:00.000Z",
-      }
-    : undefined;
 
   return (
     <html lang="en" className="h-full w-full" data-theme={theme}>
       <body className={`${inter.variable} ${inter.className} h-full w-full flex flex-col antialiased bg-bg-page text-primary-text overflow-hidden`}>
-          <Providers session={localSession}>
+        <Providers>
           <Navbar />
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
             {children}
@@ -37,4 +31,3 @@ export default function RootLayout({ children }) {
     </html>
   );
 }
-

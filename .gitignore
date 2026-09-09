@@ -35,3 +35,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# e2e auth state — NEVER commit credentials/cookies
+/e2e/.auth
+*.storage-state.json
+
+# uploaded media (local runtime artifacts)
+/public/uploads
+
+# dev server log
+/dev.log

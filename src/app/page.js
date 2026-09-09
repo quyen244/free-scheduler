@@ -1,6 +1,6 @@
 "use client";
 
-import { useSession, signIn } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { useEffect, useState, useRef } from "react";
 import { FaYoutube, FaExclamationTriangle, FaClock, FaCheckCircle, FaTimesCircle, FaGlobe, FaLock, FaChevronDown, FaInstagram, FaFacebook, FaLinkedin, FaPinterest } from "react-icons/fa";
 import { FaXTwitter, FaThreads } from "react-icons/fa6";
@@ -109,8 +109,7 @@ export default function WorkspaceDashboard() {
   
   // Fetch connected accounts & scheduler posts
   useEffect(() => {
-    if (!session?.user) return;
-    
+    // Local mode: server resolves the user (real Google session or stored Google account).
     // Fetch accounts
     fetch("/api/social/accounts")
       .then(res => res.json())
@@ -127,10 +126,9 @@ export default function WorkspaceDashboard() {
 
     // Fetch posts
     fetchPosts();
-  }, [session, platform]);
+  }, [platform]);
 
   const fetchPosts = () => {
-    if (!session?.user) return;
     fetch("/api/posts")
       .then(res => res.json())
       .then(data => {
@@ -142,7 +140,6 @@ export default function WorkspaceDashboard() {
 
   // Auto-refresh queue every 4 seconds if there is a processing post
   useEffect(() => {
-    if (!session?.user) return;
     const hasProcessing = posts.some(p => p.status === "processing");
     if (!hasProcessing) return;
 
@@ -152,15 +149,13 @@ export default function WorkspaceDashboard() {
         .then(data => {
           if (Array.isArray(data)) {
             setPosts(data);
-            // Proactively update user session to sync credits balance on complete/fail
-            updateSession();
           }
         })
         .catch(err => console.error("Error polling posts:", err));
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [posts, session]);
+  }, [posts]);
 
   // Handle media file upload
   const handleFileUpload = async (e) => {
@@ -193,10 +188,6 @@ export default function WorkspaceDashboard() {
   // Submit Publish/Schedule Task
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!session?.user) {
-      signIn("google");
-      return;
-    }
 
     if (!selectedAccountId) {
       alert("Please select a connected account first.");
@@ -258,7 +249,6 @@ export default function WorkspaceDashboard() {
       
       // Refresh posts list
       fetchPosts();
-      updateSession();
       alert(isScheduled ? "Post scheduled successfully!" : "Publishing job started!");
     } catch (err) {
       console.error(err);
@@ -279,7 +269,6 @@ export default function WorkspaceDashboard() {
       const data = await res.json();
       if (res.ok) {
         fetchPosts();
-        updateSession();
       } else {
         alert(data.error || "Failed to delete post");
       }
@@ -417,8 +406,7 @@ export default function WorkspaceDashboard() {
               {/* Target Channel (Custom Dropdown) */}
               <div className="flex flex-col gap-1.5 animate-fade-in">
                 <label className="text-xs font-semibold text-zinc-400">Target Channel</label>
-                {session?.user ? (
-                  filteredAccounts.length > 0 ? (
+                {filteredAccounts.length > 0 ? (
                     <div className="relative z-30" ref={channelRef}>
                       <button
                         type="button"
@@ -472,16 +460,7 @@ export default function WorkspaceDashboard() {
                         Connect account
                       </Link>
                     </div>
-                  )
-                ) : (
-                  <button
-                    type="button"
-                    disabled
-                    className="w-full bg-zinc-900/40 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-600 outline-none text-left cursor-not-allowed"
-                  >
-                    Sign in to view accounts
-                  </button>
-                )}
+                  )}
               </div>
 
           {/* Video Uploader Container */}
