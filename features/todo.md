@@ -2,6 +2,11 @@
 
 Source design: [automated-reup-platform-system-design.md](../reports/automated-reup-platform-system-design.md)
 
+Execution roadmap: [pipeline-delivery-roadmap.md](pipeline-delivery-roadmap.md)
+
+Follow the execution roadmap for milestone order, acceptance gates, and
+evidence. The sections below remain the implementation inventory.
+
 Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` blocked.
 
 ## Confirmed product decisions
@@ -16,7 +21,9 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 
 ## P0 — prove assumptions and contracts
 
+- [ ] [Pipeline delivery roadmap - complete Steps 0-3](pipeline-delivery-roadmap.md)
 - [ ] [Foundation and rights](foundation_and_rights/todo.md)
+- [ ] [Media variants and manifest](media_variants_manifest/todo.md)
 - [ ] [Platform sandbox](platform_sandbox/todo.md)
 
 ## P1 — first reliable YouTube vertical slice
@@ -31,7 +38,6 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 
 ## P2 — correct assets and Facebook chunks
 
-- [ ] [Media variants and manifest](media_variants_manifest/todo.md)
 - [ ] [Facebook chunk publishing](facebook_chunk_publishing/todo.md)
 
 ## P3 — commerce data
@@ -79,4 +85,3 @@ flowchart LR
 The first useful release ends at YouTube: a rendered source enters the Inbox,
 one Telegram approval is consumed exactly once, one selected channel receives
 the whole 16:9 video and thumbnail, and restarts do not lose or duplicate work.
-

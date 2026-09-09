@@ -20,11 +20,16 @@ Open n8n at `http://localhost:5678`. The existing external `n8n_data` volume
 stores the n8n database and credentials. Moving this folder does not recreate
 or delete that volume.
 
-To import the latest workflow file:
+The canonical Git export is `workflows/reup-pipeline.json`. Export the live
+database workflow before editing this file, and review differences before an
+import. To import the reviewed canonical file:
 
 ```powershell
-docker compose exec n8n n8n import:workflow --input=/workflows/f7-render.json
+docker compose exec -T n8n n8n import:workflow --input=/workflows/reup-pipeline.json
 ```
+
+Files named `f3` through `f7` are historical phase snapshots. They are useful
+for understanding earlier stages but are not the current workflow.
 
 ## Folder map
 

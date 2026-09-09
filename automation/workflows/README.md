@@ -4,10 +4,13 @@ n8n workflow JSON, in version control. Mounted read-only into the n8n container
 at `/workflows`. The editor is where workflows change; this directory is where
 they are recorded, and a two-way sync would only fight itself.
 
+`reup-pipeline.json` is the canonical export of the latest reviewed live
+workflow. Files named `f3` through `f7` are historical phase snapshots. Do not
+import a phase snapshot over the canonical or live workflow unless rollback to
+that exact phase is intentional.
+
 ```bash
-docker compose exec n8n n8n import:workflow --input=/workflows/f4-ingest-transcribe-chunk.json
-docker compose exec n8n n8n update:workflow --id=reupPipeline --active=true
-docker compose restart n8n     # webhooks register at boot
+docker compose exec -T n8n n8n import:workflow --input=/workflows/reup-pipeline.json
 ```
 
 ## One workflow, one id
@@ -43,7 +46,12 @@ docker compose exec n8n n8n export:workflow --id=<id> --pretty --output=/tmp/w.j
 docker cp n8n:/tmp/w.json workflows/<name>.json
 ```
 
-## `f3-ingest-async.json`
+## Historical phase snapshots
+
+The sections below explain how the pipeline grew. They are documentation and
+rollback points, not the current import target.
+
+### `f3-ingest-async.json`
 
 `Webhook → Start ingest → Wait for ingest → Ingest ok? → Ingested | Ingest failed`
 
@@ -73,7 +81,7 @@ the path rather than replacing the host keeps the execution id **and** the
 to `http://n8n:5678/` instead would fix the callback and break every
 browser-facing webhook URL in the editor.
 
-## `f4-ingest-transcribe-chunk.json`
+### `f4-ingest-transcribe-chunk.json`
 
 `Webhook → Start ingest → Wait for ingest → Ingest ok? → Ingested → Transcribe
 → Chunk → Chunked`
@@ -93,7 +101,7 @@ a job + Wait pair, exactly like ingest.
 `max_chunk_s` / `min_chunk_s` to that node's body — no rebuild, which was the
 only real argument for keeping chunking in a Code node.
 
-## `f5-translate.json`
+### `f5-translate.json`
 
 `... → Transcribe → Vietnamese? → Chunk`
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`↳ Start translate → Wait for translation → Translate ok? → Chunk | Translate failed`
@@ -121,7 +129,7 @@ makes it work from both.
 one short would shift every subtitle after it, and that is only visible two
 stages later. It lands here instead of in the `chunks` table.
 
-## `f6-voice.json`
+### `f6-voice.json`
 
 `... → Chunked → Start voice → Wait for voice → Voice ok? → Voiced | Voice failed`
 
@@ -141,11 +149,12 @@ there onwards. The only defence against an unlistenable segment is that
 somebody is told, so the array has to survive to the end of the pipeline where
 F8 sends it.
 
-## `f7-render.json`
+### `f7-render.json`
 
 `... → Voiced → Start render → Wait for render → Render ok? → Rendered | Render failed`
 
-The whole thing, ending in a file you can upload. Import it over the F6 file.
+The historical F7 pipeline ends in a vertical render. It is not the current
+import target and it does not yet create the required landscape YouTube asset.
 
 **`Start render` names no preset.** It uses the service's `DEFAULT_PRESET`, so
 the geometry lives in `data/presets/<name>.json` and not in the workflow. Add a
