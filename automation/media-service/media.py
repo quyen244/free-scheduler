@@ -7,8 +7,9 @@ from pathlib import Path
 import yt_dlp
 
 from config import settings
-from errors import AudioExtractionError, DownloadError, InvalidURLError
+from errors import AudioExtractionError, DownloadError, InvalidURLError, SourcePolicyError
 from shared import pipeline_db
+import validation
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,13 @@ def video_dir(video_id: str) -> Path:
     return settings.data_dir / video_id
 
 
-def get_or_download(url: str) -> tuple[dict[str, object], bool]:
+def get_or_download(
+    url: str,
+    rights_status: str,
+    rights_evidence: str | None = None,
+) -> tuple[dict[str, object], bool]:
     video_id = extract_video_id(url)
+    validation.validate_rights(rights_status)
     directory = video_dir(video_id)
     raw = directory / RAW_NAME
     audio = directory / AUDIO_NAME
@@ -45,12 +51,17 @@ def get_or_download(url: str) -> tuple[dict[str, object], bool]:
     # must not read as a cache hit, or the next stage gets a truncated file.
     if raw.is_file() and audio.is_file() and meta.is_file():
         record = json.loads(meta.read_text(encoding="utf-8"))
+        record = _validate_and_enrich(
+            record, raw, url, video_id, rights_status, rights_evidence
+        )
+        meta.write_text(
+            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         _record_ingested(record)
         return record, True
 
     directory.mkdir(parents=True, exist_ok=True)
     info = _download_video(url, directory, raw)
-    _extract_audio(raw, audio)
 
     record: dict[str, object] = {
         "video_id": video_id,
@@ -58,6 +69,23 @@ def get_or_download(url: str) -> tuple[dict[str, object], bool]:
         "title": info.get("title") or video_id,
         "duration_s": float(info.get("duration") or 0.0),
     }
+    try:
+        record = _validate_and_enrich(
+            record, raw, url, video_id, rights_status, rights_evidence
+        )
+    except SourcePolicyError as exc:
+        pipeline_db.record_validation_failure(
+            video_id=video_id,
+            source_url=url,
+            title=str(record["title"]),
+            rights_status=rights_status,
+            rights_evidence=rights_evidence,
+            error_code=exc.code,
+            error=str(exc),
+        )
+        raise
+
+    _extract_audio(raw, audio)
     meta.write_text(
         # ensure_ascii=False: titles are routinely Vietnamese or Chinese, and
         # escape sequences make the file unreadable when inspected by hand.
@@ -82,7 +110,39 @@ def _record_ingested(record: dict[str, object]) -> None:
         source_url=str(record["source_url"]),
         title=str(record["title"]),
         duration_s=float(record["duration_s"]),  # type: ignore[arg-type]
+        source_hash=str(record["source_hash"]),
+        width=int(record["width"]),
+        height=int(record["height"]),
+        rights_status=str(record["rights_status"]),
+        rights_evidence=(
+            str(record["rights_evidence"])
+            if record.get("rights_evidence") is not None
+            else None
+        ),
     )
+
+
+def _validate_and_enrich(
+    record: dict[str, object],
+    raw: Path,
+    url: str,
+    video_id: str,
+    rights_status: str,
+    rights_evidence: str | None,
+) -> dict[str, object]:
+    measured = validation.probe(raw)
+    return {
+        **record,
+        "video_id": video_id,
+        "source_url": url,
+        "duration_s": measured.duration_s,
+        "width": measured.width,
+        "height": measured.height,
+        "source_hash": validation.sha256(raw),
+        "rights_status": rights_status,
+        "rights_evidence": rights_evidence,
+        "validation_status": "valid",
+    }
 
 
 def _download_video(url: str, directory: Path, raw: Path) -> dict:

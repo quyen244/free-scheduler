@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 import chunker
 from config import settings
-from errors import EmptyTranscriptError
+from errors import ChunkBoundaryError, EmptyTranscriptError
 from main import app
 from shared import pipeline_db
 
@@ -26,8 +26,8 @@ TEST_VIDEO_ID = "3gi_15UH9fQ"
 
 MEDIA_SERVICE = "http://media-service:8001"
 
-MAX_CHUNK_S = 240.0
-MIN_CHUNK_S = 60.0
+MAX_CHUNK_S = 300.0
+MIN_CHUNK_S = 240.0
 
 
 def _segments(*spans: tuple[float, float]) -> list[dict[str, object]]:
@@ -64,6 +64,25 @@ def test_chunk_boundaries_fall_on_segment_edges_and_respect_the_ceiling():
         assert earlier.end_s == later.start_s
 
 
+@pytest.mark.parametrize(
+    ("duration_s", "expected_durations"),
+    [
+        (300, [300]),
+        (540, [540]),
+        (600, [300, 300]),
+        (822, [274, 274, 274]),
+        (1200, [300, 300, 300, 300]),
+    ],
+)
+def test_reference_contract_chunk_counts(duration_s, expected_durations):
+    chunks = chunker.build_chunks(_evenly(duration_s, 1.0))
+
+    assert [chunk.duration_s for chunk in chunks] == expected_durations
+    assert [chunk.name for chunk in chunks] == [
+        f"part_{index}" for index in range(1, len(chunks) + 1)
+    ]
+
+
 def test_every_chunk_records_its_own_duration():
     # The field the original script never wrote, and the one that decides
     # whether a chunk is publishable.
@@ -73,16 +92,21 @@ def test_every_chunk_records_its_own_duration():
         assert chunk.duration_s == pytest.approx(chunk.end_s - chunk.start_s)
 
 
-def test_a_short_tail_is_not_shipped_as_its_own_chunk():
-    # The 4:05 case from the caveats: greedy accumulation alone gives
-    # [0:00-4:00] and [4:00-4:05], and five seconds is not a publishable chunk.
-    chunks = chunker.build_chunks(_evenly(49, 5.0), MAX_CHUNK_S, MIN_CHUNK_S)
+def test_video_duration_not_last_spoken_word_controls_complete_coverage():
+    segments = _evenly(59, 10.0)  # speech ends at 9:50 in a 10:00 video
 
-    assert len(chunks) > 1
-    for chunk in chunks:
-        assert chunk.duration_s >= MIN_CHUNK_S
-        assert chunk.duration_s <= MAX_CHUNK_S
-    assert chunks[-1].end_s == 245.0
+    chunks = chunker.build_chunks(segments, source_duration_s=600.0)
+
+    assert len(chunks) == 2
+    assert chunks[0].start_s == 0.0
+    assert chunks[-1].end_s == 600.0
+
+
+def test_a_five_minute_source_is_one_chunk_not_a_greedy_tail():
+    chunks = chunker.build_chunks(_evenly(60, 5.0), MAX_CHUNK_S, MIN_CHUNK_S)
+
+    assert len(chunks) == 1
+    assert chunks[0].duration_s == 300.0
 
 
 def test_a_video_shorter_than_the_floor_is_still_one_whole_chunk():
@@ -103,17 +127,14 @@ def test_a_missing_or_empty_segment_list_is_rejected_loudly():
         chunker.build_chunks(None, MAX_CHUNK_S, MIN_CHUNK_S)
 
 
-def test_a_segment_longer_than_the_ceiling_becomes_its_own_chunk():
-    # Boundaries only fall on segment edges, so an over-long segment cannot be
-    # split. It must come out whole, and it must not push an empty chunk ahead
-    # of itself the way the original did when segment 0 exceeded the threshold.
-    chunks = chunker.build_chunks(
-        _segments((0.0, 300.0), (300.0, 400.0)), MAX_CHUNK_S, MIN_CHUNK_S
-    )
-
-    assert [(c.start_s, c.end_s) for c in chunks] == [(0.0, 300.0), (300.0, 400.0)]
-    for chunk in chunks:
-        assert chunk.text.strip() != ""
+def test_a_missing_safe_boundary_is_rejected_instead_of_cutting_speech():
+    with pytest.raises(ChunkBoundaryError):
+        chunker.build_chunks(
+            _segments((0.0, 500.0), (500.0, 600.0)),
+            MAX_CHUNK_S,
+            MIN_CHUNK_S,
+            single_chunk_max_s=0,
+        )
 
 
 def test_text_is_joined_trimmed_and_counted():
@@ -164,9 +185,10 @@ def test_chunk_writes_rows_and_advances_the_stage():
     assert len(rows) == body["total_chunks"]
     assert [row["idx"] for row in rows] == list(range(len(rows)))
     for row in rows:
+        assert row["name"] == f"part_{row['idx'] + 1}"
+        assert abs(row["boundary_shift_s"]) <= chunker.BOUNDARY_SHIFT_MAX_S
         assert row["duration_s"] == pytest.approx(row["end_s"] - row["start_s"])
-        assert row["duration_s"] <= MAX_CHUNK_S
-        assert row["duration_s"] >= MIN_CHUNK_S
+        assert row["duration_s"] > 0
         assert row["text"].strip() != ""
         # Not `== "pending"`. `replace_chunks` keeps the render state of a chunk
         # whose boundaries did not move, so re-chunking a fixture that has
@@ -192,7 +214,13 @@ def test_chunking_twice_leaves_one_set_of_rows():
         # A second call with a smaller ceiling produces more chunks. The rows
         # left behind must describe the second run, not both runs interleaved.
         second = client.post(
-            "/chunk", json={"video_id": TEST_VIDEO_ID, "max_chunk_s": 120.0}
+            "/chunk",
+            json={
+                "video_id": TEST_VIDEO_ID,
+                "max_chunk_s": 120.0,
+                "min_chunk_s": 60.0,
+                "single_chunk_max_s": 0.0,
+            },
         ).json()
 
     assert second["total_chunks"] > first["total_chunks"]

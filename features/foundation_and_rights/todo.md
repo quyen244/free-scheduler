@@ -12,7 +12,9 @@
 
 ## Domain work and verification
 
-- [ ] Implement rights and delivery mapping as domain validation.
-- [ ] Add fixtures for one-, three-, variable-, and zero-chunk sources.
-- [ ] Test that unknown rights and missing required assets block review.
-- [ ] Test that metadata, target, and brand edits invalidate approval.
+- [x] Implement rights and delivery mapping as executable contract validation.
+- [x] Add fixtures for one-, three-, variable-, and zero-chunk sources.
+- [x] Test that unknown rights and missing required assets block review.
+- [x] Test that metadata, target, and brand edits invalidate approval.
+
+Evidence: [Step 1 acceptance report](../../reports/pipeline-acceptance-contract-step-1.md)

@@ -8,6 +8,7 @@ import chunker
 import library
 import transcriber
 from errors import (
+    ChunkBoundaryError,
     EmptyTranscriptError,
     InvalidVideoIdError,
     MediaNotFoundError,
@@ -65,6 +66,13 @@ async def handle_empty_transcript(
     return JSONResponse(status_code=422, content={"error": str(exc)})
 
 
+@app.exception_handler(ChunkBoundaryError)
+async def handle_chunk_boundary(
+    request: Request, exc: ChunkBoundaryError
+) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"error": str(exc)})
+
+
 @app.exception_handler(TranscriptionError)
 async def handle_transcription_error(
     request: Request, exc: TranscriptionError
@@ -111,7 +119,12 @@ def chunk_video(request: ChunkRequest) -> ChunkResponse:
     """
     transcript = library.load_transcript(request.video_id)
     built = chunker.build_chunks(
-        transcript.get("segments"), request.max_chunk_s, request.min_chunk_s
+        transcript.get("segments"),
+        request.max_chunk_s,
+        request.min_chunk_s,
+        request.single_chunk_max_s,
+        request.boundary_shift_max_s,
+        transcript.get("duration_s"),
     )
 
     pipeline_db.replace_chunks(
@@ -119,9 +132,11 @@ def chunk_video(request: ChunkRequest) -> ChunkResponse:
         [
             {
                 "idx": chunk.idx,
+                "name": chunk.name,
                 "start_s": chunk.start_s,
                 "end_s": chunk.end_s,
                 "duration_s": chunk.duration_s,
+                "boundary_shift_s": chunk.boundary_shift_s,
                 "text": chunk.text,
             }
             for chunk in built
@@ -134,5 +149,7 @@ def chunk_video(request: ChunkRequest) -> ChunkResponse:
         total_chunks=len(built),
         max_chunk_s=request.max_chunk_s,
         min_chunk_s=request.min_chunk_s,
+        single_chunk_max_s=request.single_chunk_max_s,
+        boundary_shift_max_s=request.boundary_shift_max_s,
         chunks=[Chunk(**vars(chunk)) for chunk in built],
     )

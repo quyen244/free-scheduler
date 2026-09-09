@@ -64,6 +64,51 @@ def init() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
     _widen_job_kinds()
+    _add_chunk_contract_columns()
+    _add_source_validation_columns()
+
+
+def _add_chunk_contract_columns() -> None:
+    """Migrate installed SQLite databases to the named balanced-chunk contract."""
+    with connect() as conn:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(chunks)").fetchall()
+        }
+        if "name" not in columns:
+            conn.execute("ALTER TABLE chunks ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+        if "boundary_shift_s" not in columns:
+            conn.execute(
+                "ALTER TABLE chunks ADD COLUMN boundary_shift_s REAL NOT NULL DEFAULT 0"
+            )
+        conn.execute(
+            "UPDATE chunks SET name = 'part_' || (idx + 1) "
+            "WHERE name IS NULL OR name = ''"
+        )
+
+
+def _add_source_validation_columns() -> None:
+    """Add source identity and validation evidence without replacing user data."""
+    definitions = {
+        "width": "INTEGER",
+        "height": "INTEGER",
+        "source_hash": "TEXT",
+        "rights_status": "TEXT NOT NULL DEFAULT 'unknown'",
+        "rights_evidence": "TEXT",
+        "validation_status": "TEXT NOT NULL DEFAULT 'pending'",
+        "validation_error_code": "TEXT",
+    }
+    with connect() as conn:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(videos)").fetchall()
+        }
+        for name, definition in definitions.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE videos ADD COLUMN {name} {definition}")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_videos_source_hash ON videos (source_hash)"
+        )
 
 
 def _widen_job_kinds() -> None:
@@ -137,7 +182,17 @@ def _now() -> str:
 # --- videos ---------------------------------------------------------------
 
 
-def record_ingested(video_id: str, source_url: str, title: str, duration_s: float) -> None:
+def record_ingested(
+    video_id: str,
+    source_url: str,
+    title: str,
+    duration_s: float,
+    source_hash: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    rights_status: str = "unknown",
+    rights_evidence: str | None = None,
+) -> None:
     """Create or refresh the parent row for a video that now has media on disk.
 
     Deliberately does **not** write ``stage`` on the conflict path. A video
@@ -148,16 +203,78 @@ def record_ingested(video_id: str, source_url: str, title: str, duration_s: floa
     with connect() as conn:
         conn.execute(
             """
-            INSERT INTO videos (video_id, source_url, title, duration_s, stage, updated_at)
-                 VALUES (?, ?, ?, ?, 'ingested', ?)
+            INSERT INTO videos (
+                video_id, source_url, title, duration_s, width, height,
+                source_hash, rights_status, rights_evidence, validation_status,
+                validation_error_code, stage, updated_at
+            )
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'valid', NULL, 'ingested', ?)
             ON CONFLICT(video_id) DO UPDATE SET
                      source_url = excluded.source_url,
                      title      = excluded.title,
                      duration_s = excluded.duration_s,
+                     width      = excluded.width,
+                     height     = excluded.height,
+                     source_hash = excluded.source_hash,
+                     rights_status = excluded.rights_status,
+                     rights_evidence = excluded.rights_evidence,
+                     validation_status = 'valid',
+                     validation_error_code = NULL,
                      error      = NULL,
                      updated_at = excluded.updated_at
             """,
-            (video_id, source_url, title, duration_s, _now()),
+            (
+                video_id,
+                source_url,
+                title,
+                duration_s,
+                width,
+                height,
+                source_hash,
+                rights_status,
+                rights_evidence,
+                _now(),
+            ),
+        )
+
+
+def record_validation_failure(
+    video_id: str,
+    source_url: str,
+    title: str,
+    rights_status: str,
+    rights_evidence: str | None,
+    error_code: str,
+    error: str,
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO videos (
+                video_id, source_url, title, rights_status, rights_evidence,
+                validation_status, validation_error_code, stage, error, updated_at
+            )
+                 VALUES (?, ?, ?, ?, ?, 'failed', ?, 'ingested', ?, ?)
+            ON CONFLICT(video_id) DO UPDATE SET
+                     source_url = excluded.source_url,
+                     title = excluded.title,
+                     rights_status = excluded.rights_status,
+                     rights_evidence = excluded.rights_evidence,
+                     validation_status = 'failed',
+                     validation_error_code = excluded.validation_error_code,
+                     error = excluded.error,
+                     updated_at = excluded.updated_at
+            """,
+            (
+                video_id,
+                source_url,
+                title,
+                rights_status,
+                rights_evidence,
+                error_code,
+                error,
+                _now(),
+            ),
         )
 
 
@@ -219,12 +336,20 @@ def replace_chunks(video_id: str, chunks: list[dict[str, object]]) -> None:
         try:
             conn.executemany(
                 """
-                INSERT INTO chunks (video_id, idx, start_s, end_s, duration_s, text)
-                     VALUES (:video_id, :idx, :start_s, :end_s, :duration_s, :text)
+                INSERT INTO chunks (
+                    video_id, idx, name, start_s, end_s, duration_s,
+                    boundary_shift_s, text
+                )
+                     VALUES (
+                        :video_id, :idx, :name, :start_s, :end_s, :duration_s,
+                        :boundary_shift_s, :text
+                     )
                 ON CONFLICT(video_id, idx) DO UPDATE SET
+                         name       = excluded.name,
                          start_s    = excluded.start_s,
                          end_s      = excluded.end_s,
                          duration_s = excluded.duration_s,
+                         boundary_shift_s = excluded.boundary_shift_s,
                          text       = excluded.text,
                          status = CASE WHEN chunks.start_s = excluded.start_s
                                         AND chunks.end_s   = excluded.end_s
@@ -257,7 +382,8 @@ def chunks_for(video_id: str) -> list[dict[str, object]]:
     """
     with connect() as conn:
         rows = conn.execute(
-            "SELECT idx, start_s, end_s, duration_s, text, hook, caption, status, "
+            "SELECT idx, name, start_s, end_s, duration_s, boundary_shift_s, "
+            "text, hook, caption, status, "
             "final_path FROM chunks WHERE video_id = ? ORDER BY idx",
             (video_id,),
         ).fetchall()

@@ -37,11 +37,16 @@ def reap_orphans() -> None:
         _notify(job_id)
 
 
-def run_ingest(job_id: str, url: str) -> None:
+def run_ingest(
+    job_id: str,
+    url: str,
+    rights_status: str,
+    rights_evidence: str | None,
+) -> None:
     pipeline_db.mark_running(job_id)
 
     try:
-        record, cached = media.get_or_download(url)
+        record, cached = media.get_or_download(url, rights_status, rights_evidence)
     except Exception as exc:  # noqa: BLE001 — top of the worker; nothing above it catches
         logger.exception("ingest job %s failed", job_id)
         pipeline_db.finish_job(job_id, "failed", error=f"{type(exc).__name__}: {exc}")
@@ -57,6 +62,10 @@ def run_ingest(job_id: str, url: str) -> None:
                 "raw_path": str(directory / media.RAW_NAME),
                 "audio_path": str(directory / media.AUDIO_NAME),
                 "cached": cached,
+                "width": record["width"],
+                "height": record["height"],
+                "source_hash": record["source_hash"],
+                "rights_status": record["rights_status"],
             },
         )
 

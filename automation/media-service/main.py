@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 
 import jobs
 import media
-from errors import AudioExtractionError, DownloadError, InvalidURLError
+import validation
+from errors import AudioExtractionError, DownloadError, InvalidURLError, SourcePolicyError
 from schema import DownloadRequest, JobAccepted, JobRequest, MediaResponse
 from shared import pipeline_db
 
@@ -43,6 +44,16 @@ async def handle_extraction_error(
     return JSONResponse(status_code=502, content={"error": str(exc)})
 
 
+@app.exception_handler(SourcePolicyError)
+async def handle_source_policy(
+    request: Request, exc: SourcePolicyError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"error": str(exc), "error_code": exc.code, "retryable": False},
+    )
+
+
 @app.get("/health")
 async def health() -> dict[str, object]:
     return {"status": "ok"}
@@ -54,9 +65,16 @@ def create_ingest_job(request: JobRequest, background: BackgroundTasks) -> JobAc
     # mistake, and it deserves a 400 now instead of a failed job to go and read
     # about later.
     video_id = media.extract_video_id(request.url)
+    validation.validate_rights(request.rights_status)
 
     job_id = pipeline_db.create_job(video_id, "ingest", request.callback_url)
-    background.add_task(jobs.run_ingest, job_id, request.url)
+    background.add_task(
+        jobs.run_ingest,
+        job_id,
+        request.url,
+        request.rights_status,
+        request.rights_evidence,
+    )
     return JobAccepted(job_id=job_id, video_id=video_id, state="queued")
 
 
@@ -70,7 +88,9 @@ def read_job(job_id: str) -> JSONResponse:
 
 @app.post("/download", response_model=MediaResponse)
 def download(request: DownloadRequest) -> MediaResponse:
-    record, cached = media.get_or_download(request.url)
+    record, cached = media.get_or_download(
+        request.url, request.rights_status, request.rights_evidence
+    )
     directory = media.video_dir(str(record["video_id"]))
 
     return MediaResponse(
@@ -80,4 +100,8 @@ def download(request: DownloadRequest) -> MediaResponse:
         raw_path=str(directory / media.RAW_NAME),
         audio_path=str(directory / media.AUDIO_NAME),
         cached=cached,
+        width=int(record["width"]),
+        height=int(record["height"]),
+        source_hash=str(record["source_hash"]),
+        rights_status=str(record["rights_status"]),
     )

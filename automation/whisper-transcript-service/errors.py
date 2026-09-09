@@ -16,3 +16,7 @@ class TranscriptNotFoundError(Exception):
 
 class EmptyTranscriptError(Exception):
     """A transcript arrived with no segments to chunk."""
+
+
+class ChunkBoundaryError(Exception):
+    """Balanced chunks cannot be placed safely on transcript boundaries."""

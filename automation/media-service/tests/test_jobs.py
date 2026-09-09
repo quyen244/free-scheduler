@@ -24,8 +24,8 @@ from shared import pipeline_db
 # uvicorn, in this same container. See the module docstring.
 SERVICE = "http://127.0.0.1:8001"
 
-TEST_VIDEO_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
-TEST_VIDEO_ID = "jNQXAC9IVRw"
+TEST_VIDEO_URL = "https://www.youtube.com/watch?v=3gi_15UH9fQ"
+TEST_VIDEO_ID = "3gi_15UH9fQ"
 
 # Shaped like a YouTube id, owned by no video. Passes URL validation and fails
 # inside yt-dlp — the failure that strands a workflow if nothing calls back.
@@ -82,7 +82,11 @@ def test_ingest_job_answers_at_once_and_calls_back_when_the_work_is_done():
         started = time.monotonic()
         response = httpx.post(
             f"{SERVICE}/media/jobs",
-            json={"url": TEST_VIDEO_URL, "callback_url": _resume_url(recorder)},
+            json={
+                "url": TEST_VIDEO_URL,
+                "rights_status": "owned",
+                "callback_url": _resume_url(recorder),
+            },
             timeout=30.0,
         )
         answered_in = time.monotonic() - started
@@ -127,7 +131,11 @@ def test_a_failed_ingest_calls_back_too_instead_of_parking_the_workflow():
     with callback_recorder() as recorder:
         response = httpx.post(
             f"{SERVICE}/media/jobs",
-            json={"url": DEAD_VIDEO_URL, "callback_url": _resume_url(recorder)},
+            json={
+                "url": DEAD_VIDEO_URL,
+                "rights_status": "owned",
+                "callback_url": _resume_url(recorder),
+            },
             timeout=30.0,
         )
         assert response.status_code == 202

@@ -14,6 +14,13 @@ CREATE TABLE IF NOT EXISTS videos (
     source_url  TEXT NOT NULL,
     title       TEXT,
     duration_s  REAL,
+    width       INTEGER,
+    height      INTEGER,
+    source_hash TEXT,
+    rights_status TEXT NOT NULL DEFAULT 'unknown',
+    rights_evidence TEXT,
+    validation_status TEXT NOT NULL DEFAULT 'pending',
+    validation_error_code TEXT,
     source_lang TEXT,
     preset      TEXT,
     stage       TEXT NOT NULL DEFAULT 'ingested'
@@ -30,11 +37,13 @@ CREATE TABLE IF NOT EXISTS videos (
 CREATE TABLE IF NOT EXISTS chunks (
     video_id        TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
     idx             INTEGER NOT NULL,
+    name            TEXT NOT NULL,
     start_s         REAL NOT NULL,
     end_s           REAL NOT NULL,
     -- Stored, not derived: duration is what decides whether a chunk is
     -- publishable, and the original chunking script never recorded it.
     duration_s      REAL NOT NULL,
+    boundary_shift_s REAL NOT NULL DEFAULT 0,
     text            TEXT NOT NULL,
     hook            TEXT,
     caption         TEXT,

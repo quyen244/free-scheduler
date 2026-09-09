@@ -1,0 +1,74 @@
+{
+  "schema_version": "step1.v1",
+  "policy": {
+    "min_source_duration_s": 300,
+    "max_source_duration_s": 1200,
+    "min_source_height": 720,
+    "single_chunk_max_source_s": 540,
+    "target_chunk_min_s": 240,
+    "target_chunk_max_s": 300,
+    "boundary_shift_max_s": 15,
+    "metadata_language": "vi",
+    "max_emojis_per_platform_object": 2,
+    "hashtags_per_platform_object": 5
+  },
+  "reference_sources": [
+    {
+      "id": "five_minutes",
+      "youtube_id": "fixture0500",
+      "duration_s": 300,
+      "width": 1280,
+      "height": 720,
+      "rights_status": "owned",
+      "expected_chunk_count": 1,
+      "expected_chunk_durations_s": [300]
+    },
+    {
+      "id": "nine_minutes",
+      "youtube_id": "fixture0900",
+      "duration_s": 540,
+      "width": 1920,
+      "height": 1080,
+      "rights_status": "licensed",
+      "expected_chunk_count": 1,
+      "expected_chunk_durations_s": [540]
+    },
+    {
+      "id": "ten_minutes",
+      "youtube_id": "fixture1000",
+      "duration_s": 600,
+      "width": 1920,
+      "height": 1080,
+      "rights_status": "permission",
+      "expected_chunk_count": 2,
+      "expected_chunk_durations_s": [300, 300]
+    },
+    {
+      "id": "thirteen_minutes_42_seconds",
+      "youtube_id": "fixture1342",
+      "duration_s": 822,
+      "width": 1920,
+      "height": 1080,
+      "rights_status": "public_domain",
+      "expected_chunk_count": 3,
+      "expected_chunk_durations_s": [274, 274, 274]
+    },
+    {
+      "id": "twenty_minutes",
+      "youtube_id": "fixture2000",
+      "duration_s": 1200,
+      "width": 3840,
+      "height": 2160,
+      "rights_status": "owned",
+      "expected_chunk_count": 4,
+      "expected_chunk_durations_s": [300, 300, 300, 300]
+    }
+  ],
+  "invalid_sources": [
+    {"id": "too_short", "duration_s": 299, "expected_error": "duration"},
+    {"id": "too_long", "duration_s": 1201, "expected_error": "duration"},
+    {"id": "low_resolution", "height": 719, "expected_error": "resolution"},
+    {"id": "corrupt", "readable": false, "expected_error": "corrupt"},
+    {"id": "unknown_rights", "rights_status": "unknown", "expected_error": "rights"}
+  ]
+}

@@ -8,3 +8,11 @@ class DownloadError(Exception):
 
 class AudioExtractionError(Exception):
     """ffmpeg failed to derive audio from an already-downloaded video."""
+
+
+class SourcePolicyError(Exception):
+    """The source is readable enough to classify but violates the MVP policy."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code

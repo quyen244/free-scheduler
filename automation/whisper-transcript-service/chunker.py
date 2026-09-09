@@ -1,130 +1,177 @@
-"""Cut a transcript into publishable chunks.
+"""Build balanced, transcript-safe Facebook/TikTok chunks.
 
-A port of the `normalize transcript` Code node, with its four defects fixed.
-Pure: no I/O, no database, no clock. Everything here is decided by the segment
-list and two thresholds, so the awkward cases are testable without a video.
-
-Boundaries always fall on Whisper segment edges. A chunk is never cut mid
-sentence, which is why an over-long single segment comes out whole rather than
-split — see `build_chunks`.
+Sources from five through nine minutes remain one chunk. Longer sources are
+split into a variable number of balanced parts targeting four to five minutes.
+Every internal cut lands on a transcript segment end within 15 seconds of its
+balanced target, so speech is not cut mid-segment and tiny tails cannot appear.
 """
 
 from dataclasses import dataclass
+from math import ceil
 
-from errors import EmptyTranscriptError
+from errors import ChunkBoundaryError, EmptyTranscriptError
 
-# The original script's `60 * 4`. Kept as the default, and overridable per
-# request so the threshold can still be tuned without a rebuild — that was the
-# one good reason it lived in a Code node.
-MAX_CHUNK_S = 240.0
-# New. The original had no floor at all, so a 4:05 video shipped a 5-second
-# second chunk.
-MIN_CHUNK_S = 60.0
+
+MIN_CHUNK_S = 240.0
+MAX_CHUNK_S = 300.0
+SINGLE_CHUNK_MAX_S = 540.0
+BOUNDARY_SHIFT_MAX_S = 15.0
 
 
 @dataclass(frozen=True)
 class Chunk:
     idx: int
+    name: str
     start_s: float
     end_s: float
     duration_s: float
     text: str
     char_count: int
+    boundary_shift_s: float
 
 
-def _chunk(idx: int, segments: list[dict]) -> Chunk:
-    start = float(segments[0]["start"])
-    end = float(segments[-1]["end"])
-    # Trim once, at the end. The original counted the untrimmed buffer, so
-    # char_count never matched the text it was reported next to.
+def _chunk(
+    idx: int,
+    segments: list[dict],
+    start_s: float,
+    end_s: float,
+    boundary_shift_s: float,
+) -> Chunk:
     text = " ".join(str(segment["text"]).strip() for segment in segments).strip()
     return Chunk(
         idx=idx,
-        start_s=start,
-        end_s=end,
-        duration_s=end - start,
+        name=f"part_{idx + 1}",
+        start_s=start_s,
+        end_s=end_s,
+        duration_s=end_s - start_s,
         text=text,
         char_count=len(text),
+        boundary_shift_s=boundary_shift_s,
     )
 
 
-def _split_point(segments: list[dict]) -> int:
-    """The segment boundary nearest the midpoint of `segments`."""
-    start = float(segments[0]["start"])
-    midpoint = start + (float(segments[-1]["end"]) - start) / 2
-    candidates = range(1, len(segments))
-    return min(candidates, key=lambda i: abs(float(segments[i]["start"]) - midpoint))
+def expected_chunk_count(
+    duration_s: float,
+    min_chunk_s: float = MIN_CHUNK_S,
+    max_chunk_s: float = MAX_CHUNK_S,
+    single_chunk_max_s: float = SINGLE_CHUNK_MAX_S,
+) -> int:
+    """Choose a balanced count without creating a tiny remainder."""
+    if min_chunk_s <= 0 or max_chunk_s <= 0 or min_chunk_s > max_chunk_s:
+        raise ValueError("chunk duration bounds must be positive and min <= max")
+    if duration_s <= single_chunk_max_s:
+        return 1
+
+    target_mid = (min_chunk_s + max_chunk_s) / 2
+    max_count = max(2, ceil(duration_s / min_chunk_s) + 1)
+
+    def score(count: int) -> tuple[float, float, int]:
+        average = duration_s / count
+        if average < min_chunk_s:
+            outside = min_chunk_s - average
+        elif average > max_chunk_s:
+            outside = average - max_chunk_s
+        else:
+            outside = 0.0
+        return outside, abs(average - target_mid), count
+
+    return min(range(2, max_count + 1), key=score)
 
 
 def build_chunks(
     segments: list[dict] | None,
     max_chunk_s: float = MAX_CHUNK_S,
     min_chunk_s: float = MIN_CHUNK_S,
+    single_chunk_max_s: float = SINGLE_CHUNK_MAX_S,
+    boundary_shift_max_s: float = BOUNDARY_SHIFT_MAX_S,
+    source_duration_s: float | None = None,
 ) -> list[Chunk]:
-    """Group `segments` into chunks of at most `max_chunk_s`.
-
-    Greedy accumulation, exactly as the original: keep adding segments until
-    the next one would carry the chunk past the ceiling, then start a new one.
-
-    The tail is the part that needed fixing. A greedy pass alone leaves
-    whatever is left over, which for a 4:05 video is five seconds — not a
-    publishable chunk. Rather than merge that tail into its predecessor (which
-    would push the predecessor past the ceiling and break the other half of the
-    rule), the last two chunks are **redistributed** across their shared
-    midpoint, so both land inside the floor and the ceiling. Merging is kept
-    only as the fallback for the degenerate case where redistributing cannot
-    satisfy the floor either.
-    """
     if not segments:
-        # The original read `$input.first().json.segments` with no guard, so an
-        # upstream failure surfaced as an unrelated crash inside the Code node.
         raise EmptyTranscriptError("no segments to chunk")
+    if boundary_shift_max_s < 0:
+        raise ValueError("boundary shift limit cannot be negative")
 
-    groups: list[list[dict]] = []
-    current: list[dict] = []
-    for segment in segments:
-        # `current` is checked first: without it, a first segment longer than
-        # the ceiling flushed an empty chunk ahead of itself.
-        if current and float(segment["end"]) - float(current[0]["start"]) > max_chunk_s:
-            groups.append(current)
-            current = [segment]
-        else:
-            current.append(segment)
-    if current:
-        groups.append(current)
+    ordered = sorted(segments, key=lambda segment: float(segment["start"]))
+    source_start = 0.0 if source_duration_s is not None else float(ordered[0]["start"])
+    source_end = (
+        float(source_duration_s)
+        if source_duration_s is not None
+        else float(ordered[-1]["end"])
+    )
+    if source_end < float(ordered[-1]["end"]):
+        raise ChunkBoundaryError("source duration ends before the final transcript segment")
+    duration_s = source_end - source_start
+    if duration_s <= 0:
+        raise EmptyTranscriptError("transcript has no positive duration")
 
-    groups = _fix_tail(groups, max_chunk_s, min_chunk_s)
-    return [_chunk(idx, group) for idx, group in enumerate(groups)]
+    count = expected_chunk_count(
+        duration_s,
+        min_chunk_s=min_chunk_s,
+        max_chunk_s=max_chunk_s,
+        single_chunk_max_s=single_chunk_max_s,
+    )
+    if count == 1:
+        return [_chunk(0, ordered, source_start, source_end, 0.0)]
 
+    split_indexes: list[int] = []
+    cut_times: list[float] = []
+    shifts: list[float] = []
+    previous_index = 0
 
-def _fix_tail(
-    groups: list[list[dict]], max_chunk_s: float, min_chunk_s: float
-) -> list[list[dict]]:
-    """Make the last chunk usable, if it is too short and there is a neighbour.
+    for cut_number in range(1, count):
+        ideal = source_start + duration_s * cut_number / count
+        remaining_chunks = count - cut_number
+        last_allowed = len(ordered) - remaining_chunks
+        candidates = range(previous_index + 1, last_allowed + 1)
+        if not candidates:
+            raise ChunkBoundaryError(
+                f"not enough transcript segments to create {count} chunks"
+            )
 
-    A single group is left alone whatever its length: the floor exists to
-    remove unusable *tails*, not to delete a short video.
-    """
-    if len(groups) < 2:
-        return groups
-
-    tail = groups[-1]
-    if float(tail[-1]["end"]) - float(tail[0]["start"]) >= min_chunk_s:
-        return groups
-
-    combined = groups[-2] + tail
-    if len(combined) > 1:
-        at = _split_point(combined)
-        left, right = combined[:at], combined[at:]
-        both_ok = all(
-            min_chunk_s
-            <= float(part[-1]["end"]) - float(part[0]["start"])
-            <= max_chunk_s
-            for part in (left, right)
+        split_index = min(
+            candidates,
+            key=lambda index: abs(float(ordered[index - 1]["end"]) - ideal),
         )
-        if both_ok:
-            return groups[:-2] + [left, right]
+        cut_time = float(ordered[split_index - 1]["end"])
+        shift = cut_time - ideal
+        if abs(shift) > boundary_shift_max_s:
+            raise ChunkBoundaryError(
+                "no transcript boundary falls within "
+                f"{boundary_shift_max_s:g}s of the balanced cut at {ideal:.3f}s"
+            )
+        if cut_times and cut_time <= cut_times[-1]:
+            raise ChunkBoundaryError("transcript boundaries are not strictly increasing")
 
-    # Redistributing cannot satisfy the floor — a very long segment, or a very
-    # short predecessor. One over-long chunk beats an unusable stub.
-    return groups[:-2] + [combined]
+        split_indexes.append(split_index)
+        cut_times.append(cut_time)
+        shifts.append(shift)
+        previous_index = split_index
+
+    chunks: list[Chunk] = []
+    segment_start = 0
+    chunk_start = source_start
+    for idx, (segment_end, chunk_end, shift) in enumerate(
+        zip(split_indexes, cut_times, shifts)
+    ):
+        chunks.append(
+            _chunk(
+                idx,
+                ordered[segment_start:segment_end],
+                chunk_start,
+                chunk_end,
+                shift,
+            )
+        )
+        segment_start = segment_end
+        chunk_start = chunk_end
+
+    chunks.append(
+        _chunk(
+            count - 1,
+            ordered[segment_start:],
+            chunk_start,
+            source_end,
+            0.0,
+        )
+    )
+    return chunks

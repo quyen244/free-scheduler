@@ -37,7 +37,9 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 ## P0 — prove assumptions and contracts
 
 - [ ] [Pipeline delivery roadmap - complete Steps 0-3](pipeline-delivery-roadmap.md)
-- [ ] [Foundation and rights](foundation_and_rights/todo.md)
+- [x] [Pipeline acceptance contract](pipeline_acceptance_contract/todo.md) — 12
+  provider-free tests passed; [evidence](../reports/pipeline-acceptance-contract-step-1.md).
+- [x] [Foundation and rights](foundation_and_rights/todo.md)
 - [ ] [Source ingest and validation](source_ingest_validation/todo.md)
 - [ ] [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md)
 - [ ] [Brand profiles and branded variants](brand_profiles/todo.md)

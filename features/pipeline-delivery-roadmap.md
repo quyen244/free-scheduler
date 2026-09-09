@@ -65,7 +65,8 @@ canonical JSON without losing nodes, connections, or credential references.
 
 Goal: turn the product idea into assertions that later stages must satisfy.
 
-- [ ] Complete [Foundation and rights](foundation_and_rights/todo.md).
+- [x] Complete [Foundation and rights](foundation_and_rights/todo.md).
+- [x] Complete the executable [Pipeline acceptance contract](pipeline_acceptance_contract/todo.md).
 - [x] Document YouTube URL input, validation, rights, and reusable source identity.
 - [x] Defer local-file input until after the URL pipeline is reliable.
 - [x] Document variable, unique, sentence-safe 4-5 minute chunks.
@@ -74,23 +75,27 @@ Goal: turn the product idea into assertions that later stages must satisfy.
   maximum, and cost-first model-selection policy.
 - [x] Document brand-profile account grouping, watermark, and signature music.
 - [x] Document failed-stage resume, target-only retry, notifications, and retention.
-- [ ] Resolve the pending implementation decisions above.
-- [ ] Define reference fixtures for 5-, 9-, 10-, 13:42-, and 20-minute sources.
-- [ ] Require one whole edited 1920x1080 YouTube asset per selected brand.
-- [ ] Require N edited 1080x1920 chunk assets per selected brand, shared by that
+- [x] Classify model/music calibration as Step 2 work and Shopee credentials as
+  later commerce work; none changes the Step 1 behavioral contract.
+- [x] Define reference fixtures for 5-, 9-, 10-, 13:42-, and 20-minute sources.
+- [x] Require one whole edited 1920x1080 YouTube asset per selected brand.
+- [x] Require N edited 1080x1920 chunk assets per selected brand, shared by that
   brand's Facebook and TikTok targets.
-- [ ] Require exactly seven targets for a three-chunk, one-brand fixture:
+- [x] Require exactly seven targets for a three-chunk, one-brand fixture:
   `1 YouTube + 3 Facebook + 3 TikTok`.
-- [ ] Assert that no upload target can run before approval.
-- [ ] Assert that one approval covers the complete campaign revision.
-- [ ] Assert that an edit after approval invalidates the approval.
-- [ ] Assert that unknown rights block review and approval.
-- [ ] Assert that TikTok success means `draft delivered`, not `publicly posted`.
+- [x] Assert that no upload target can run before approval.
+- [x] Assert that one approval covers the complete campaign revision.
+- [x] Assert that an edit after approval invalidates the approval.
+- [x] Assert that unknown rights block review and approval.
+- [x] Assert that TikTok success means `draft delivered`, not `publicly posted`.
 
 Evidence:
 
 - [Lifecycle architecture](../reports/reup-pipeline-lifecycle.md)
 - [Interactive lifecycle prototype](../reports/reup-pipeline-lifecycle-prototype.html)
+- [Step 1 executable-contract evidence](../reports/pipeline-acceptance-contract-step-1.md)
+- `python -m unittest discover -s automation/acceptance-contract -p "test_*.py" -v`
+  - 12 tests passed on September 9, 2026.
 
 Done when: confirmed specs and fixture/domain tests express source validation,
 metadata, ratios, brands, revisions, recovery, and expected delivery behavior

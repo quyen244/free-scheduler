@@ -29,11 +29,14 @@ class ChunkRequest(BaseModel):
     # Overridable per request. The threshold living outside the code was the
     # one good reason chunking sat in an n8n Code node; it survives the move.
     max_chunk_s: float = Field(default=chunker.MAX_CHUNK_S, gt=0)
-    min_chunk_s: float = Field(default=chunker.MIN_CHUNK_S, ge=0)
+    min_chunk_s: float = Field(default=chunker.MIN_CHUNK_S, gt=0)
+    single_chunk_max_s: float = Field(default=chunker.SINGLE_CHUNK_MAX_S, ge=0)
+    boundary_shift_max_s: float = Field(default=chunker.BOUNDARY_SHIFT_MAX_S, ge=0)
 
 
 class Chunk(BaseModel):
     idx: int
+    name: str
     start_s: float
     end_s: float
     # Stored as well as returned: duration is what decides whether a chunk is
@@ -41,6 +44,7 @@ class Chunk(BaseModel):
     duration_s: float
     text: str
     char_count: int
+    boundary_shift_s: float
 
 
 class ChunkResponse(BaseModel):
@@ -48,4 +52,6 @@ class ChunkResponse(BaseModel):
     total_chunks: int
     max_chunk_s: float
     min_chunk_s: float
+    single_chunk_max_s: float
+    boundary_shift_max_s: float
     chunks: list[Chunk]
