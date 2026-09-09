@@ -1,0 +1,7 @@
+# The ZeroTTS weights: ~900 MB of ONNX pulled from the HF Hub on first use and
+# cached here so a rebuild does not fetch them again. The root .gitignore
+# already excludes *.onnx everywhere; this keeps the rest of the Hub cache —
+# tokenizer, config, blobs, refs — out with it.
+models/*
+!models/.gitkeep
+__pycache__/

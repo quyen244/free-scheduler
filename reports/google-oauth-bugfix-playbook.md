@@ -143,7 +143,7 @@ Non-auth errors keep normal alert behavior (no noise).
 - oEmbed 200, title `[E2E Local Test] 2026-09-09T02:39:01.041Z`, author `Mindset Forge`
 - Post `cmtthq70c0001bwo3bf2ixdh1`, mediaUrl `/uploads/bf99b76f-51dd-47cc-b596-63c16ccd54e1.mp4`
 - Evidence: `e2e/result.json`
-- Video source: `D:\Projects\Assignment\n8n\data\3gi_15UH9fQ.bench-backup\processed\final.mp4` (99.5 MB)
+- Video source: `D:\Projects\Assignment\Free-AI-Social-Media-Scheduler\automation\data\3gi_15UH9fQ.bench-backup\processed\final.mp4` (99.5 MB)
 
 If a future run fails, diff its output against this baseline: Step 1 no-login OK →
 accounts poll OK → Step 3a/3b/3c → POST 200 → queue completed → oEmbed 200.

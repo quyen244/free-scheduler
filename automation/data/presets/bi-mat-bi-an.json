@@ -1,0 +1,36 @@
+{
+  "_comment": "Preset for the 'bí mật & bí ẩn' channel. All geometry is normalised 0-1 against the canvas, never pixels, so one preset survives a source-resolution change. See features/video-reup-pipeline/contracts.md.",
+
+  "canvas": { "w": 1080, "h": 1920 },
+
+  "background": "bg-mystery.png",
+
+  "video_rect": { "x": 0.0, "y": 0.28, "w": 1.0, "h": 0.44 },
+
+  "blur_regions": [
+    { "x": 0.02, "y": 0.86, "w": 0.30, "h": 0.10, "_note": "source channel bug, bottom-left" }
+  ],
+
+  "subtitle": {
+    "y": 0.755,
+    "font": "DejaVu Sans",
+    "size": 46,
+    "color": "#FFFFFF",
+    "outline_color": "#000000",
+    "outline": 3,
+    "max_chars_per_line": 38,
+    "max_lines": 2
+  },
+
+  "logo": { "path": "logo.png", "x": 0.045, "y": 0.30, "w": 0.115, "opacity": 0.9 },
+
+  "_watermark_note": "Moved from y=0.725 after seeing a real frame: it landed inside the two-line subtitle block. 0.80 is the clear band below the subtitles.",
+  "watermark": { "text": "bí mật & bí ẩn", "x": 0.5, "y": 0.80, "size": 26, "color": "#D4AF37", "opacity": 0.55 },
+
+  "caption_top": { "y": 0.115, "size": 62, "color": "#FFFFFF", "max_chars_per_line": 24 },
+  "caption_bottom": { "y": 0.885, "size": 54, "color": "#D4AF37", "max_chars_per_line": 28 },
+
+  "encode": { "vcodec": "h264_nvenc", "fallback_vcodec": "libx264", "crf": 21, "acodec": "aac", "abr": "128k" },
+
+  "tts": { "voice": "maichi", "min_atempo": 0.75, "max_atempo": 1.35 }
+}

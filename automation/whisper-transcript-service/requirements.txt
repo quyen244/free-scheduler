@@ -1,0 +1,10 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+faster-whisper==1.2.1
+# yt-dlp deliberately absent: acquisition moved to media-service, and this
+# service must not be able to download anything. It keeps the YouTube-facing
+# dependency (and its churn) out of the multi-gigabyte CUDA image.
+httpx==0.28.1
+# In the runtime image on purpose. The tests must run against the real
+# container, and a container recreate wipes anything pip-installed by hand.
+pytest==8.3.4

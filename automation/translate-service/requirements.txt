@@ -1,0 +1,11 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+# Job callbacks, and what fastapi's TestClient runs on.
+httpx==0.28.1
+# In the runtime image on purpose. The tests must run against the real
+# container, and installing pytest by hand after every rebuild is a step that
+# gets skipped exactly when it matters.
+pytest==8.3.4
+# CPU only. This box has one 6 GB GPU and Whisper already lives on it; a 1.8B
+# translator competing for that VRAM would slow the stage that matters more.
+llama-cpp-python==0.3.16

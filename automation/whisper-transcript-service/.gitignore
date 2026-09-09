@@ -1,0 +1,17 @@
+# Cached Whisper model weights and downloaded video/audio never get
+# committed — this is a public repo (see features/whisper-transcript-service/
+# conflicts.md #1). Keep the directories present via .gitkeep.
+models/*
+!models/.gitkeep
+videos/*
+!videos/.gitkeep
+
+# YouTube auth cookies are live session credentials, never source. Any
+# filename/format (browser-extension JSON export, converted Netscape .txt).
+cookies.json
+cookies.txt
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

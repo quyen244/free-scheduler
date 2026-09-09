@@ -1,0 +1,20 @@
+# The root .gitignore excludes everything in here except `schema.sql` and
+# `presets/`, so this file only has to guard what lands *inside* presets/.
+#
+# It cannot re-include anything: git never descends into an excluded
+# directory, so a negation here would be dead. Re-inclusions live in the root
+# .gitignore next to the `data/*` rule that causes the exclusion.
+
+# Model weights never belong in git, wherever they land. They are large, and
+# HY-MT1.5 ships under the Tencent HY Community Licence, which is not an
+# open-source licence and restricts redistribution.
+presets/**/*.gguf
+presets/**/*.onnx
+presets/**/*.safetensors
+presets/**/*.npz
+
+# Nor does media. Backgrounds and logos are small, deliberate, and worth
+# diffing; a video that wandered into presets/ is neither.
+presets/**/*.mp4
+presets/**/*.wav
+presets/**/*.mkv

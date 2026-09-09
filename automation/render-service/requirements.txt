@@ -1,0 +1,12 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+# Job callbacks, and what the tests talk to the running service with.
+httpx==0.28.1
+# In the runtime image on purpose. The tests must run against the real
+# container, and installing pytest by hand after every rebuild is a step that
+# gets skipped exactly when it matters.
+pytest==8.3.4
+# Vietnamese TTS on ONNX Runtime — no torch, so 0 MB of VRAM. That is the
+# whole reason it was picked over XTTS-v2: all 6 GB stays with Whisper.
+zerotts==0.1.2
+numpy==2.5.3

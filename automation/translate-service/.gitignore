@@ -1,0 +1,7 @@
+# Model weights: 1.1 GB, and HY-MT1.5 ships under the Tencent HY Community
+# Licence, which restricts redistribution. The root .gitignore already excludes
+# *.gguf everywhere; this keeps the rest of models/ out too, so a future
+# tokenizer or config dump does not arrive by accident.
+models/*
+!models/.gitkeep
+__pycache__/

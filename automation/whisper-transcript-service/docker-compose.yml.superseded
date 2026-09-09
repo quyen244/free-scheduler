@@ -1,0 +1,20 @@
+services:
+  whisper-transcript-service:
+    build: .
+    ports:
+      # Localhost-only: this is a local dev tool, not meant to be reachable
+      # from other machines (see spec.md decision #7).
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Mounts the whole source tree, not just models/videos: code edits take
+      # effect on container restart with no rebuild needed (uvicorn --reload
+      # picks them up live). models/ and videos/ persist as a side effect,
+      # since they're subdirectories of the same mount.
+      - .:/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

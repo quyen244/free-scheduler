@@ -4,7 +4,7 @@ Date: 2026-09-09
 Scope inspected:
 
 - Scheduler app: `D:\Projects\Assignment\Free-AI-Social-Media-Scheduler`
-- Media automation: `D:\Projects\Assignment\n8n`
+- Media automation: `D:\Projects\Assignment\Free-AI-Social-Media-Scheduler\automation`
 
 ## 1. Executive recommendation
 
@@ -99,9 +99,9 @@ Live-state observations during this audit:
   an orphan that should be reaped and surfaced at the next service start.
 - All rendered chunk rows still have `ready_to_upload = 0`, consistent with F8
   not being implemented.
-- `D:\Projects\Assignment\n8n` already has user-owned uncommitted changes in
-  `shared/callbacks.py` and `shared/test_callbacks.py`. This report does not
-  modify them.
+- The migrated automation unit includes the user-owned callback changes in
+  `automation/shared/callbacks.py` and `automation/shared/test_callbacks.py`.
+  The migration preserved their contents.
 
 ### 3.2 Scheduler app audit
 

@@ -1,0 +1,61 @@
+# The same service, with ONNX Runtime able to reach the GPU.
+#
+# Kept beside the CPU Dockerfile rather than replacing it. The CPU image is
+# small (python:3.12-slim) and needs no driver; this one carries a CUDA runtime
+# and only works on a host with the NVIDIA container toolkit. Which one to run
+# is a compose decision, not a code decision - nothing in the service imports
+# differently.
+#
+#   docker compose build render-service   # after pointing `dockerfile:` here
+#
+# ZeroTTS takes an explicit provider list, so the service asks for CUDA and
+# falls back to the CPU provider inside the same process when the GPU is not
+# reachable. That means this image is safe to run without a GPU: it is slower,
+# not broken.
+# 24.04 and not 22.04: `requirements.txt` pins numpy 2.5.3, which has no wheel
+# for the Python 3.10 that 22.04 ships. 24.04 ships 3.12, the same interpreter
+# as the CPU image, so both images run the identical dependency set.
+# CUDA 13 and not 12.x: onnxruntime-gpu 1.29 refuses a 12.x runtime with
+# "Require cuDNN 9.* and CUDA 13.*", loads no CUDA provider, and then runs
+# on the CPU without failing - a GPU image that is quietly not one.
+FROM nvidia/cuda:13.0.0-cudnn-runtime-ubuntu24.04
+
+WORKDIR /app
+
+# python3 for the app; ffmpeg for the composite and the per-segment atempo;
+# libass burns the subtitles; fontconfig resolves the preset's font family.
+# DejaVu covers Vietnamese diacritics, which most default sans faces render as
+# boxes.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-venv \
+    ffmpeg \
+    fontconfig \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+# 24.04 marks its system Python as externally managed, so pip refuses to touch
+# it. A venv is the supported answer and costs nothing here.
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
+COPY requirements.txt .
+# onnxruntime arrives as a ZeroTTS dependency, not as a pinned line, so it is
+# installed first and then swapped. Both wheels provide the same `onnxruntime`
+# module and having them side by side is undefined, hence the uninstall.
+#
+# The GPU wheel is pinned to whatever version the CPU one resolved to: a
+# mismatch gives ZeroTTS a runtime it was never tested against, and if that
+# exact GPU wheel does not exist the build should fail here rather than three
+# minutes into a synthesis job.
+RUN pip install --no-cache-dir -r requirements.txt \
+    && ORT="$(python -c 'import onnxruntime; print(onnxruntime.__version__)')" \
+    && echo "swapping onnxruntime ${ORT} for onnxruntime-gpu ${ORT}" \
+    && pip uninstall -y onnxruntime \
+    && pip install --no-cache-dir "onnxruntime-gpu==${ORT}"
+
+COPY . .
+
+EXPOSE 8003
+
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]

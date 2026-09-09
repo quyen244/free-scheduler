@@ -1,0 +1,13 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+# Job callbacks, and what fastapi's TestClient runs on.
+httpx==0.28.1
+# In the runtime image on purpose. The tests must run against the real
+# container, and installing pytest by hand after every rebuild is a step that
+# gets skipped exactly when it matters.
+pytest==8.3.4
+# Deliberately unpinned: YouTube changes its anti-bot checks every few months
+# and a stale yt-dlp starts failing ordinary videos with HTTP 403. Rebuild with
+# `docker compose build --no-cache media-service` to actually pick up a newer
+# release — an ordinary build reuses the cached pip layer forever.
+yt-dlp

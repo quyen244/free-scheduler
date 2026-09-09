@@ -1,0 +1,365 @@
+{
+  "id": "reupPipeline",
+  "name": "reup · F4 ingest → transcribe → chunk",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reup-pipeline",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -200,
+        0
+      ],
+      "webhookId": "b1000000-0000-4000-8000-000000000001",
+      "notes": "One stable id and one stable path for the whole pipeline. Each feature re-imports this workflow under the same id rather than adding a second one: two workflows claiming a path leaves the loser silently unregistered, and deactivating the winner does not hand the path back."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://media-service:8001/media/jobs",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.body.url }}"
+            },
+            {
+              "name": "callback_url",
+              "value": "={{ 'http://n8n:5678/webhook-waiting/' + $execution.resumeUrl.split('/webhook-waiting/')[1] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Start ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        20,
+        0
+      ],
+      "notes": "The host is swapped, not the path: $execution.resumeUrl is built from WEBHOOK_URL and would say localhost:5678, which inside media-service means media-service. The split keeps the execution id and any ?signature= the resume URL carries."
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Wait for ingest",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        0
+      ],
+      "webhookId": "b1000000-0000-4000-8000-000000000003",
+      "notes": "httpMethod is POST on purpose. The default is GET, and a POST callback to a GET-only resume webhook 404s — the execution then waits forever for a callback that already happened."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.body.state }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Ingest ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1000000-0000-4000-8000-000000000001",
+              "name": "video_id",
+              "value": "={{ $json.body.video_id }}",
+              "type": "string"
+            },
+            {
+              "id": "d1000000-0000-4000-8000-000000000002",
+              "name": "title",
+              "value": "={{ $json.body.result.title }}",
+              "type": "string"
+            },
+            {
+              "id": "d1000000-0000-4000-8000-000000000003",
+              "name": "duration_s",
+              "value": "={{ $json.body.result.duration_s }}",
+              "type": "number"
+            },
+            {
+              "id": "d1000000-0000-4000-8000-000000000004",
+              "name": "raw_path",
+              "value": "={{ $json.body.result.raw_path }}",
+              "type": "string"
+            },
+            {
+              "id": "d1000000-0000-4000-8000-000000000005",
+              "name": "audio_path",
+              "value": "={{ $json.body.result.audio_path }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Ingested",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        680,
+        -100
+      ],
+      "notes": "F4 continues from here: the transcript service takes video_id, never the URL."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1000000-0000-4000-8000-000000000011",
+              "name": "video_id",
+              "value": "={{ $json.body.video_id }}",
+              "type": "string"
+            },
+            {
+              "id": "d1000000-0000-4000-8000-000000000012",
+              "name": "stage",
+              "value": "ingest",
+              "type": "string"
+            },
+            {
+              "id": "d1000000-0000-4000-8000-000000000013",
+              "name": "error",
+              "value": "={{ $json.body.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Ingest failed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        680,
+        100
+      ],
+      "notes": "Reached because the service calls back on failure too. Without that this branch is unreachable and the execution simply never ends. F9 hangs the Telegram alert here."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://whisper-transcript-service:8000/transcribe",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "video_id",
+              "value": "={{ $json.video_id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "a2000000-0000-4000-8000-000000000006",
+      "name": "Transcribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        900,
+        -100
+      ],
+      "notes": "Synchronous, unlike ingest: transcription runs at roughly 0.05x realtime on the GPU, so an 11-minute source takes ~30 s. The 15-minute timeout below is what covers a long source; if one ever hits it, this node becomes a job + Wait pair like ingest."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://whisper-transcript-service:8000/chunk",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "video_id",
+              "value": "={{ $json.video_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a2000000-0000-4000-8000-000000000007",
+      "name": "Chunk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1120,
+        -100
+      ],
+      "notes": "Takes a video_id, not segments. The service reads transcript.json off the shared volume, so thousands of segments never travel through n8n. Add max_chunk_s / min_chunk_s here to tune the thresholds without a rebuild."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1000000-0000-4000-8000-000000000021",
+              "name": "video_id",
+              "value": "={{ $json.video_id }}",
+              "type": "string"
+            },
+            {
+              "id": "d1000000-0000-4000-8000-000000000022",
+              "name": "total_chunks",
+              "value": "={{ $json.total_chunks }}",
+              "type": "number"
+            },
+            {
+              "id": "d1000000-0000-4000-8000-000000000023",
+              "name": "title",
+              "value": "={{ $('Ingested').first().json.title }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a2000000-0000-4000-8000-000000000008",
+      "name": "Chunked",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1340,
+        -100
+      ],
+      "notes": "The chunk rows are the deliverable; this is just the summary the execution shows. F5 inserts Translate between Transcribe and Chunk."
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Start ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start ingest": {
+      "main": [
+        [
+          {
+            "node": "Wait for ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for ingest": {
+      "main": [
+        [
+          {
+            "node": "Ingest ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest ok?": {
+      "main": [
+        [
+          {
+            "node": "Ingested",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ingest failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingested": {
+      "main": [
+        [
+          {
+            "node": "Transcribe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe": {
+      "main": [
+        [
+          {
+            "node": "Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk": {
+      "main": [
+        [
+          {
+            "node": "Chunked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

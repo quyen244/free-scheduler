@@ -1,0 +1,8 @@
+# The weights are bind-mounted by compose, never fetched or baked. Without this
+# line every build copies 1.1 GB into the context and then into a layer that
+# the mount immediately hides.
+models/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/

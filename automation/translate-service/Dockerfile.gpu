@@ -1,0 +1,94 @@
+# The same service, with llama.cpp offloading its layers to the GPU.
+#
+# Kept beside the CPU Dockerfile rather than replacing it, exactly as
+# render-service does. Which one runs is a compose decision; nothing in the
+# service imports differently, and `LLAMA_GPU_LAYERS` decides how much of the
+# model actually leaves the CPU.
+#
+# The 6 GB constraint the CPU Dockerfile cites was an assumption, not a
+# measurement. Whisper `base` at float16 holds ~231 MiB of the 6144 MiB card,
+# so a 1.13 GB Q4_K_M translator fits beside it with room to spare.
+#
+# This compiles llama-cpp-python from source, which the CPU image warns costs
+# close to three hours. That is not laziness - it was tried the cheap way
+# first. The newest prebuilt CUDA wheel is 0.3.13, and it cannot load these
+# weights at all:
+#
+#   llama_model_loader: - kv 0: general.architecture str = hunyuan-dense
+#   llama_model_load: error loading model: unknown model architecture
+#
+# `hunyuan-dense` support arrived between 0.3.13 and the 0.3.16 pinned in
+# requirements.txt, so the version is not negotiable and neither is the build.
+#
+# `CMAKE_CUDA_ARCHITECTURES=75` is what keeps it bearable: 75 is this box's
+# GTX 1660 Ti (Turing) and nothing else. The default builds every architecture
+# llama.cpp supports, which multiplies the compile for cards this host does not
+# have. Change this line when the hardware changes - a mismatched arch does not
+# fall back gracefully, it fails to find a kernel at runtime.
+
+# ---- build stage -------------------------------------------------------
+# `devel` and not `runtime`: nvcc lives only in devel, and it is 3 GB that the
+# finished image has no use for. It stays behind in this stage.
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS build
+
+# ninja is not optional: llama-cpp-python's scikit-build-core backend calls it
+# by name, and without it the build dies in 40 seconds with a bare
+# FileNotFoundError that mentions no CUDA problem at all.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-dev build-essential cmake ninja-build git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/requirements.txt
+
+# ggml-cuda calls the CUDA driver API (cuMemCreate, cuMemMap and friends), which
+# lives in libcuda.so - a driver library, not a toolkit one, so no container
+# image ships the real thing. CUDA provides a stub to link against, but it sits
+# in a directory the linker does not search by default, and the build gets all
+# the way to 176 of 183 objects before failing with a page of
+# "undefined reference to `cuMemCreate'". Pointing LIBRARY_PATH at the stubs is
+# link-time only: at runtime the real libcuda.so comes from the host driver
+# through the NVIDIA container toolkit.
+ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+
+# Build a wheel rather than installing in place, so the runtime stage can take
+# the artefact and none of the toolchain.
+RUN CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=75" \
+    FORCE_CMAKE=1 \
+    pip3 wheel --no-cache-dir --no-deps --wheel-dir /wheels \
+        "$(grep '^llama-cpp-python' /tmp/requirements.txt)"
+
+# ---- runtime stage -----------------------------------------------------
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+WORKDIR /app
+
+# 22.04 ships Python 3.10, which is the interpreter the wheel above was built
+# for. The symlink keeps `python` working, so the compose healthcheck and the
+# CMD are identical to the CPU image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    libgomp1 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+COPY --from=build /wheels /wheels
+
+# Everything except llama-cpp-python from the index, then the CUDA wheel built
+# above. `--no-index` on the second line is deliberate: if the wheel is missing
+# pip must fail here rather than reach out to PyPI and quietly install the CPU
+# build, which would produce a GPU image that is not one.
+RUN grep -v '^llama-cpp-python' requirements.txt > /tmp/requirements.gpu.txt \
+    && pip3 install --no-cache-dir -r /tmp/requirements.gpu.txt \
+    && pip3 install --no-cache-dir --no-index --find-links /wheels llama-cpp-python \
+    && rm -rf /wheels
+
+COPY . .
+
+EXPOSE 8002
+
+# No --reload, for the reason the CPU Dockerfile gives: this service's work
+# runs for minutes in the background, and a reload lands as a graceful shutdown
+# that blocks the port until the job drains.
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]

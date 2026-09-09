@@ -1,0 +1,11 @@
+# Runtime assets are bind-mounted through the service directory. Do not copy
+# large model caches, downloaded media, or live YouTube credentials into an
+# image layer.
+models/
+videos/
+cookies.json
+cookies.txt
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/

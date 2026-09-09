@@ -1,0 +1,9 @@
+# The weights are bind-mounted at /models, so copying them into the image
+# would add ~900 MB to say the same thing twice — and would invalidate the
+# layer on every cache write the Hub makes.
+models/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+tests/__pycache__/

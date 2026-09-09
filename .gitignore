@@ -45,3 +45,12 @@ next-env.d.ts
 
 # dev server log
 /dev.log
+
+# Local automation runtime artifacts
+/automation/data/*
+!/automation/data/.gitignore
+!/automation/data/schema.sql
+!/automation/data/presets/
+/automation/**/__pycache__/
+/automation/**/.pytest_cache/
+/automation/**/*.pyc
