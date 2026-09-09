@@ -1,6 +1,7 @@
 # n8n-to-app handoff — todo
 
-- [ ] Define and version the render-complete payload schema.
+- [ ] Define and version the render-complete payload schema, including metadata
+  revision, brand-profile IDs, clean-master lineage, and branded variants.
 - [ ] Add timestamp, nonce/idempotency key, and HMAC verification.
 - [ ] Add `/api/internal/render-complete`.
 - [ ] Canonicalize and allowlist media paths.
@@ -8,4 +9,3 @@
 - [ ] Upsert source/items/assets and outbox atomically.
 - [ ] Add the final n8n HTTP node after `Rendered`.
 - [ ] Test duplicate, reordered, expired, tampered, and missing-file callbacks.
-

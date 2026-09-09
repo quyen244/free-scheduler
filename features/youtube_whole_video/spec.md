@@ -10,9 +10,10 @@ each selected YouTube channel, then set its custom thumbnail.
 
 ## How it works
 
-The adapter verifies a `WHOLE_VIDEO`/16:9 target, refreshes the selected channel
-credential, streams a resumable upload, persists its upload/video IDs, sets the
-thumbnail, polls processing, and records the final URL.
+The adapter verifies a `WHOLE_VIDEO`/16:9 target and approved metadata revision,
+refreshes the selected channel credential, streams a resumable upload, persists
+its upload/video IDs, sets the generated custom thumbnail, polls processing, and
+records the final URL.
 
 ```mermaid
 flowchart LR
@@ -38,4 +39,3 @@ flowchart LR
 A private sandbox upload sends the whole landscape file—not any chunk—sets the
 thumbnail, records the URL/attempts, and survives a worker restart without a
 duplicate video.
-

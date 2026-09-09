@@ -4,9 +4,10 @@
 - [ ] Bind uploads to stable `SocialAccount` channel IDs.
 - [ ] Stream the file into a resumable session.
 - [ ] Persist session/video ID before further polling.
+- [ ] Bind generated title, description, hashtags/tags, and thumbnail text to the
+  approved metadata revision.
 - [ ] Add title, description, tags, category, privacy, and made-for-kids validation.
 - [ ] Add custom thumbnail upload and result tracking.
 - [ ] Add processing-status polling and reconciliation.
 - [ ] Test wrong asset kind/ratio is rejected.
 - [ ] Run the end-to-end private YouTube MVP acceptance test.
-

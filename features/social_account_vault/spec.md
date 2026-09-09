@@ -6,7 +6,8 @@ Depends on: core data model, platform sandbox
 ## What it is
 
 A first-class model for 5-10 YouTube channels, Facebook Pages, and TikTok
-creators, separate from NextAuth login accounts.
+creators, separate from NextAuth login accounts and grouped through explicit
+brand profiles.
 
 ## How it works
 
@@ -30,6 +31,8 @@ flowchart LR
 - Do not reuse NextAuth's `Account` table as the social-account registry.
 - Encrypt tokens with authenticated encryption; redact all logs.
 - Store provider user/channel/Page IDs, scopes, expiry, and reconnect reason.
+- Brand membership supplies campaign selection, watermark, and signature music;
+  credentials remain owned by the social account vault.
 - A platform failure on one account must not disable peer accounts.
 
 ## Done when
@@ -37,4 +40,3 @@ flowchart LR
 Two accounts of one provider can be connected, labeled, independently refreshed,
 selected, revoked, and shown as healthy or reconnect-required without exposing
 tokens.
-

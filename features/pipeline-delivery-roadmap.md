@@ -9,14 +9,14 @@ execution ID, external sandbox ID, screenshot, or report path.
 
 ## Current focus
 
-Complete Steps 0-3 before implementing account management, Telegram approval,
-or a real platform publisher.
+Complete Steps 0-3 before implementing real account credentials, Telegram
+approval, or a platform publisher.
 
 Immediate objective:
 
-> Export the live n8n workflow, then make one source reliably produce one valid
-> 1920x1080 whole video and every required 1080x1920 chunk, described by a
-> validated manifest.
+> Make one accepted source reliably produce selected whole/per-chunk metadata,
+> one valid 1920x1080 whole video, every required 1080x1920 chunk, and
+> mock-branded variants described by a validated manifest.
 
 ## Known baseline
 
@@ -30,13 +30,16 @@ Verified on September 9, 2026:
 - `data/3gi_15UH9fQ/chunks/001/final.mp4` fails `ffprobe`, although its database
   row says `rendered`.
 
-## Pending product decisions
+## Pending implementation decisions
 
-- [ ] Confirm whether the YouTube whole video uses the edited Vietnamese voice,
-  subtitles, watermark, and layout or preserves any original elements.
+- [x] Use Vietnamese metadata with curiosity-driven, engaging,
+  never-misleading copy and at most two relevant emojis per platform object.
+- [x] Use a cost-first fixture evaluation to select the OpenAI model.
+- [ ] Record the selected OpenAI model and per-campaign cost ceiling after the
+  fixture evaluation.
+- [ ] Calibrate signature-music loudness, speech ducking, looping, fade, and
+  missing-file behavior against a fixture.
 - [ ] Confirm Shopee Affiliate Open API `app_id` and `secret_key` availability.
-- [ ] Confirm manual account selection for the first MVP; defer saved groups
-  until the one-account flow works.
 
 ## Step 0 - freeze the live workflow
 
@@ -63,10 +66,20 @@ canonical JSON without losing nodes, connections, or credential references.
 Goal: turn the product idea into assertions that later stages must satisfy.
 
 - [ ] Complete [Foundation and rights](foundation_and_rights/todo.md).
-- [ ] Define a three-chunk reference fixture.
-- [ ] Require one whole edited 1920x1080 YouTube asset.
-- [ ] Require three edited 1080x1920 chunk assets shared by Facebook and TikTok.
-- [ ] Require exactly seven targets for one account on each platform:
+- [x] Document YouTube URL input, validation, rights, and reusable source identity.
+- [x] Defer local-file input until after the URL pipeline is reliable.
+- [x] Document variable, unique, sentence-safe 4-5 minute chunks.
+- [x] Document whole-video and per-chunk metadata outputs and edit invalidation.
+- [x] Document Vietnamese language, curiosity-driven truthful tone, two-emoji
+  maximum, and cost-first model-selection policy.
+- [x] Document brand-profile account grouping, watermark, and signature music.
+- [x] Document failed-stage resume, target-only retry, notifications, and retention.
+- [ ] Resolve the pending implementation decisions above.
+- [ ] Define reference fixtures for 5-, 9-, 10-, 13:42-, and 20-minute sources.
+- [ ] Require one whole edited 1920x1080 YouTube asset per selected brand.
+- [ ] Require N edited 1080x1920 chunk assets per selected brand, shared by that
+  brand's Facebook and TikTok targets.
+- [ ] Require exactly seven targets for a three-chunk, one-brand fixture:
   `1 YouTube + 3 Facebook + 3 TikTok`.
 - [ ] Assert that no upload target can run before approval.
 - [ ] Assert that one approval covers the complete campaign revision.
@@ -76,23 +89,32 @@ Goal: turn the product idea into assertions that later stages must satisfy.
 
 Evidence:
 
-- Pending.
+- [Lifecycle architecture](../reports/reup-pipeline-lifecycle.md)
+- [Interactive lifecycle prototype](../reports/reup-pipeline-lifecycle-prototype.html)
 
-Done when: the fixture and domain tests express the expected delivery behavior
+Done when: confirmed specs and fixture/domain tests express source validation,
+metadata, ratios, brands, revisions, recovery, and expected delivery behavior
 without calling an external platform.
 
 ## Step 2 - produce the correct media variants
 
-Goal: render the exact asset topology required by the delivery contract.
+Goal: make the local production path correct from input validation through
+metadata, branded rendering, and media output.
 
+- [ ] Complete [Source ingest and validation](source_ingest_validation/todo.md).
+- [ ] Complete [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md).
+- [ ] Complete the mock-profile work in [Brand profiles](brand_profiles/todo.md).
 - [ ] Complete [Media variants and manifest](media_variants_manifest/todo.md).
+- [ ] Insert metadata generation after `Chunked` and before voice/render.
 - [ ] Produce `outputs/youtube/whole-16x9.mp4` as a real landscape render.
 - [ ] Never use a concatenation of vertical chunks as the YouTube asset.
-- [ ] Produce `N` vertical chunk assets for Facebook and TikTok.
-- [ ] Let Facebook and TikTok reference the same physical vertical assets until
-  a platform-specific render is required.
+- [ ] Produce `N` clean vertical chunk masters.
+- [ ] Derive branded 16:9 and 9:16 variants with mock watermark/signature music.
+- [ ] Let same-brand Facebook and TikTok reference the same physical vertical asset.
 - [ ] Preserve stable asset IDs and paths across safe retries.
-- [ ] Test one-, three-, and long-video fixtures inside Docker.
+- [ ] Test 5-, 9-, 10-, 13:42-, and 20-minute fixtures inside Docker.
+- [ ] Test OpenAI transient failure and one corrupt-render recovery without
+  repeating successful stages.
 - [ ] Inspect representative frames from both layouts.
 
 Expected output:
@@ -100,12 +122,15 @@ Expected output:
 ```text
 data/<video_id>/
 |-- outputs/
-|   |-- youtube/
-|   |   `-- whole-16x9.mp4
-|   `-- vertical/
-|       |-- chunk-000-9x16.mp4
-|       |-- chunk-001-9x16.mp4
-|       `-- chunk-002-9x16.mp4
+|   |-- clean/
+|   |   |-- whole-16x9.mp4
+|   |   `-- vertical/part_<n>-9x16.mp4
+|   `-- brands/<brand_id>/revision/<n>/
+|       |-- whole-16x9.mp4
+|       `-- vertical/part_<n>-9x16.mp4
+|-- metadata/
+|   |-- youtube.json
+|   `-- chunks/part_<n>.json
 `-- media-manifest.json
 ```
 
@@ -113,8 +138,9 @@ Evidence:
 
 - Pending.
 
-Done when: a three-chunk source creates one valid landscape whole video and
-three valid vertical videos without ambiguous filenames.
+Done when: a three-chunk source creates valid selected metadata, clean masters,
+and mock-branded landscape/vertical variants without ambiguous filenames or
+unrecoverable stage failure.
 
 ## Step 3 - make the manifest the completion gate
 
@@ -169,6 +195,9 @@ Goal: inspect one immutable campaign revision and approve its full fan-out once.
 - [ ] Complete [Telegram campaign approval](telegram_campaign_approval/todo.md).
 - [ ] Validate one account per platform before adding account groups.
 - [ ] Show asset previews, warnings, selected accounts, and seven targets.
+- [ ] Show generated YouTube and per-chunk metadata with edit/regenerate controls.
+- [ ] Add `Save changes -> prepare new revision -> send approval again`.
+- [ ] Add `Retry failed stage` without restarting successful media work.
 - [ ] Send one message with `Approve all`, `Reject`, and `Open review`.
 - [ ] Consume a valid approval exactly once.
 - [ ] Reject duplicate, expired, wrong-chat, wrong-operator, and old-revision
@@ -192,6 +221,7 @@ Goal: prove retries and idempotency before spending platform quota.
 - [ ] Confirm a stale lease is recovered without duplicate delivery.
 - [ ] Make one fake target fail while the other six succeed.
 - [ ] Retry only the failed target.
+- [ ] Show `partial_failure` until all required targets reach their accepted outcomes.
 - [ ] Preserve attempt history and idempotency keys.
 
 Evidence:
@@ -265,8 +295,8 @@ Goal: add commerce and scale after the one-account contract works.
 
 - [ ] Complete [Shopee affiliate catalog](shopee_affiliate_catalog/todo.md).
 - [ ] Add an approved Shopee link to Facebook comment previews and actions.
-- [ ] Expand from one account to 5-10 accounts per platform.
-- [ ] Add saved account groups only if repeated manual selection justifies them.
+- [ ] Expand from one mock brand profile to enough profiles/accounts to manage
+  5-10 accounts per platform.
 - [ ] Verify exact fan-out counts for multiple accounts.
 - [ ] Complete [Operations dashboard](operations_dashboard/todo.md).
 - [ ] Complete [Reliability, observability, and retention](reliability_observability_retention/todo.md).
@@ -285,16 +315,18 @@ protected credentials, and no cross-account mix-ups.
 ```mermaid
 flowchart LR
     A[Freeze workflow] --> B[Acceptance contract]
-    B --> C[Media variants]
-    C --> D[Manifest gate]
-    D --> E[Data model and handoff]
-    E --> F[Review and Telegram]
-    F --> G[Queue with fake adapters]
-    G --> H[YouTube private]
-    H --> I[Facebook chunks]
-    I --> J[TikTok drafts]
-    J --> K[Shopee and multi-account]
-    K --> L[Operations hardening]
+    B --> C[Source validation]
+    C --> D[Chunk metadata]
+    D --> E[Branded media variants]
+    E --> F[Manifest gate]
+    F --> G[Data model and handoff]
+    G --> H[Review and Telegram]
+    H --> I[Queue with fake adapters]
+    I --> J[YouTube private]
+    J --> K[Facebook chunks]
+    K --> L[TikTok drafts]
+    L --> M[Shopee and multi-account]
+    M --> N[Operations hardening]
 ```
 
 ## MVP acceptance run
@@ -304,6 +336,8 @@ selected account on each platform. It must:
 
 - [ ] Produce one validated 1920x1080 whole asset.
 - [ ] Produce three validated 1080x1920 chunk assets.
+- [ ] Generate one YouTube metadata set and three chunk-specific metadata sets.
+- [ ] Apply the mock brand watermark and signature music to both ratios.
 - [ ] Show seven targets before approval.
 - [ ] Consume one Telegram approval exactly once.
 - [ ] Publish one private YouTube video.

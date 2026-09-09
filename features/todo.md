@@ -16,13 +16,31 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 - [x] TikTok receives one 9:16 draft per chunk for the MVP.
 - [x] One Telegram approval authorizes the whole selected campaign fan-out.
 - [x] Facebook destinations are administered Pages.
+- [x] Accept YouTube URLs for the MVP; require readable 5-20 minute,
+  at-least-720p media with known rights.
+- [x] Defer local-file upload/import until URL ingestion is reliable.
+- [x] Produce variable, unique, sentence-safe 4-5 minute chunks named
+  `part_1`, `part_2`, and so on.
+- [x] Generate whole-video YouTube metadata and per-chunk visual,
+  Facebook, and TikTok metadata.
+- [x] Default metadata to Vietnamese with curiosity-driven, engaging,
+  never-misleading copy, at most two relevant emojis, and cost-first model
+  selection.
+- [x] Group YouTube, Facebook, and TikTok accounts in brand profiles that own
+  the watermark and signature music for both ratios.
+- [x] Allow failed-stage resume and intentional reprocessing without
+  permanently blacklisting the source URL.
 - [ ] Confirm Shopee Affiliate Open API `app_id` and `secret_key` availability.
-- [ ] Decide whether account selection uses saved groups, manual selection, or both.
+- [ ] Record the fixture-selected OpenAI model and cost ceiling, and calibrate
+  exact signature-music ducking behavior.
 
 ## P0 — prove assumptions and contracts
 
 - [ ] [Pipeline delivery roadmap - complete Steps 0-3](pipeline-delivery-roadmap.md)
 - [ ] [Foundation and rights](foundation_and_rights/todo.md)
+- [ ] [Source ingest and validation](source_ingest_validation/todo.md)
+- [ ] [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md)
+- [ ] [Brand profiles and branded variants](brand_profiles/todo.md)
 - [ ] [Media variants and manifest](media_variants_manifest/todo.md)
 - [ ] [Platform sandbox](platform_sandbox/todo.md)
 
@@ -57,31 +75,30 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 
 ```mermaid
 flowchart LR
-    A[Foundation] --> B[Platform sandbox]
-    A --> C[Core data model]
-    C --> D[Account vault]
-    C --> E[n8n handoff]
-    E --> F[Review inbox]
-    D --> F
-    F --> G[Telegram approval]
-    G --> H[Publisher worker]
-    H --> I[YouTube]
-    C --> J[Media variants]
-    D --> K[Facebook]
-    H --> K
-    J --> K
-    D --> L[TikTok drafts]
-    H --> L
-    J --> L
-    K --> M[Shopee comments]
-    N[Operations UI] --> O[Reliability hardening]
-    I --> N
-    K --> N
-    L --> N
+    A[Foundation] --> B[Source validation]
+    B --> C[Chunk metadata]
+    C --> D[Media variants]
+    A --> E[Core data model]
+    E --> F[Account vault]
+    F --> G[Brand profiles]
+    D --> H[n8n handoff]
+    G --> H
+    H --> I[Review inbox]
+    I --> J[Telegram approval]
+    J --> K[Publisher worker]
+    K --> L[YouTube]
+    K --> M[Facebook]
+    K --> N[TikTok drafts]
+    M --> O[Shopee comments]
+    P[Operations UI] --> Q[Reliability hardening]
+    L --> P
+    M --> P
+    N --> P
 ```
 
-## MVP milestone
+## Pipeline-correctness milestone
 
-The first useful release ends at YouTube: a rendered source enters the Inbox,
-one Telegram approval is consumed exactly once, one selected channel receives
-the whole 16:9 video and thumbnail, and restarts do not lose or duplicate work.
+Before connecting real publishers, one accepted source must create a valid
+whole 16:9 asset, every required 9:16 chunk, selected metadata, mock-branded
+variants, and a complete manifest. A failed stage must be resumable without
+repeating successful work.
