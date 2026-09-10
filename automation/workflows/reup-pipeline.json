@@ -261,6 +261,214 @@
       },
       {
         "parameters": {
+          "method": "POST",
+          "url": "http://metadata-service:8004/metadata/jobs",
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "video_id",
+                "value": "={{ $('Chunked').first().json.video_id }}"
+              },
+              {
+                "name": "callback_url",
+                "value": "={{ 'http://n8n:5678/webhook-waiting/' + $execution.resumeUrl.split('/webhook-waiting/')[1] }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "a6000000-0000-4000-8000-000000000001",
+        "name": "Start metadata",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          2896,
+          -96
+        ],
+        "notes": "Starts one idempotent metadata job. A repeated active request reuses its job instead of spending twice."
+      },
+      {
+        "parameters": {
+          "resume": "webhook",
+          "httpMethod": "POST",
+          "options": {}
+        },
+        "id": "a6000000-0000-4000-8000-000000000002",
+        "name": "Wait for metadata",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          3120,
+          -96
+        ],
+        "webhookId": "b6000000-0000-4000-8000-000000000002",
+        "notes": "The metadata service posts the terminal job state here. POST must match the callback method."
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "c6000000-0000-4000-8000-000000000001",
+                "leftValue": "={{ $json.body.state }}",
+                "rightValue": "done",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              },
+              {
+                "id": "c6000000-0000-4000-8000-000000000002",
+                "leftValue": "={{ $json.body.result.state }}",
+                "rightValue": "selected",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "a6000000-0000-4000-8000-000000000003",
+        "name": "Metadata valid?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          3328,
+          -96
+        ],
+        "notes": "Voice and render stay blocked unless the job completed and every required metadata item is selected."
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "d6000000-0000-4000-8000-000000000001",
+                "name": "video_id",
+                "value": "={{ $json.body.video_id }}",
+                "type": "string"
+              },
+              {
+                "id": "d6000000-0000-4000-8000-000000000002",
+                "name": "metadata_revision_id",
+                "value": "={{ $json.body.result.revision_id }}",
+                "type": "string"
+              },
+              {
+                "id": "d6000000-0000-4000-8000-000000000003",
+                "name": "estimated_cost_usd",
+                "value": "={{ $json.body.result.estimated_cost_usd }}",
+                "type": "number"
+              },
+              {
+                "id": "d6000000-0000-4000-8000-000000000004",
+                "name": "warnings",
+                "value": "={{ $json.body.warnings ?? [] }}",
+                "type": "array"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "a6000000-0000-4000-8000-000000000004",
+        "name": "Metadata selected",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          3552,
+          -208
+        ],
+        "notes": "Carries the immutable metadata revision and soft cost warning evidence into the media stages."
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "d6000000-0000-4000-8000-000000000011",
+                "name": "job_id",
+                "value": "={{ $json.body.job_id }}",
+                "type": "string"
+              },
+              {
+                "id": "d6000000-0000-4000-8000-000000000012",
+                "name": "video_id",
+                "value": "={{ $json.body.video_id }}",
+                "type": "string"
+              },
+              {
+                "id": "d6000000-0000-4000-8000-000000000013",
+                "name": "metadata_revision_id",
+                "value": "={{ $json.body.result.revision_id ?? '' }}",
+                "type": "string"
+              },
+              {
+                "id": "d6000000-0000-4000-8000-000000000014",
+                "name": "error_code",
+                "value": "={{ $json.body.result.error_code ?? 'metadata_failed' }}",
+                "type": "string"
+              },
+              {
+                "id": "d6000000-0000-4000-8000-000000000015",
+                "name": "retryable",
+                "value": "={{ $json.body.result.retryable ?? false }}",
+                "type": "boolean"
+              },
+              {
+                "id": "d6000000-0000-4000-8000-000000000016",
+                "name": "error",
+                "value": "={{ $json.body.error ?? 'Metadata generation failed.' }}",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "a6000000-0000-4000-8000-000000000005",
+        "name": "Metadata failed",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          3552,
+          48
+        ],
+        "notes": "Terminal metadata failure is needs_action. Selected peer results remain reusable on retry."
+      },
+      {
+        "parameters": {
+          "chatId": "={{ $('Code in JavaScript').first().json.chatId }}",
+          "text": "={{ 'Metadata cần xử lý cho video ' + $json.video_id + '.\\nMã lỗi: ' + $json.error_code + '\\nChi tiết: ' + $json.error + '\\nHãy dùng Retry metadata stage; các kết quả đã thành công được giữ lại.' }}",
+          "additionalFields": {}
+        },
+        "id": "a6000000-0000-4000-8000-000000000006",
+        "name": "Metadata needs action",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          3776,
+          48
+        ],
+        "webhookId": "b6000000-0000-4000-8000-000000000006",
+        "credentials": {
+          "telegramApi": {
+            "id": "7fwKL9Enb7iOahec",
+            "name": "Telegram account"
+          }
+        },
+        "notes": "Sent only after bounded service retries are exhausted or operator input is required."
+      },
+      {
+        "parameters": {
           "conditions": {
             "options": {
               "caseSensitive": true,
@@ -424,8 +632,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.5,
         "position": [
-          2896,
-          -96
+          3776,
+          -208
         ],
         "id": "a4000000-0000-4000-8000-000000000001",
         "name": "Start voice",
@@ -440,8 +648,8 @@
         "type": "n8n-nodes-base.wait",
         "typeVersion": 1.1,
         "position": [
-          3120,
-          -96
+          4000,
+          -208
         ],
         "id": "a4000000-0000-4000-8000-000000000002",
         "name": "Wait for voice",
@@ -475,8 +683,8 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
-          3328,
-          -96
+          4208,
+          -208
         ],
         "id": "a4000000-0000-4000-8000-000000000003",
         "name": "Voice ok?",
@@ -517,8 +725,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          3552,
-          -208
+          4432,
+          -320
         ],
         "id": "a4000000-0000-4000-8000-000000000004",
         "name": "Voiced",
@@ -547,8 +755,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          3552,
-          48
+          4432,
+          -64
         ],
         "id": "a4000000-0000-4000-8000-000000000005",
         "name": "Voice failed"
@@ -575,8 +783,8 @@
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.5,
         "position": [
-          3776,
-          -208
+          4656,
+          -320
         ],
         "id": "a5000000-0000-4000-8000-000000000001",
         "name": "Start render",
@@ -591,8 +799,8 @@
         "type": "n8n-nodes-base.wait",
         "typeVersion": 1.1,
         "position": [
-          4000,
-          -208
+          4880,
+          -320
         ],
         "id": "a5000000-0000-4000-8000-000000000002",
         "name": "Wait for render",
@@ -626,8 +834,8 @@
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": [
-          4208,
-          -208
+          5088,
+          -320
         ],
         "id": "a5000000-0000-4000-8000-000000000003",
         "name": "Render ok?",
@@ -674,8 +882,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          4432,
-          -304
+          5312,
+          -416
         ],
         "id": "a5000000-0000-4000-8000-000000000004",
         "name": "Rendered",
@@ -704,8 +912,8 @@
         "type": "n8n-nodes-base.set",
         "typeVersion": 3.4,
         "position": [
-          4432,
-          -64
+          5312,
+          -176
         ],
         "id": "a5000000-0000-4000-8000-000000000005",
         "name": "Render failed"
@@ -824,8 +1032,8 @@
         "type": "n8n-nodes-base.telegram",
         "typeVersion": 1.2,
         "position": [
-          3776,
-          48
+          4656,
+          -64
         ],
         "id": "524d4c42-d3c2-49da-b69a-71660b2ffa74",
         "name": "Send a text message2",
@@ -845,8 +1053,8 @@
         "type": "n8n-nodes-base.telegram",
         "typeVersion": 1.2,
         "position": [
-          4656,
-          -64
+          5536,
+          -176
         ],
         "id": "24a75e96-b89b-49ca-99a3-667d53e9fbd7",
         "name": "Send a text message3",
@@ -995,7 +1203,69 @@
         "main": [
           [
             {
+              "node": "Start metadata",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Start metadata": {
+        "main": [
+          [
+            {
+              "node": "Wait for metadata",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait for metadata": {
+        "main": [
+          [
+            {
+              "node": "Metadata valid?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Metadata valid?": {
+        "main": [
+          [
+            {
+              "node": "Metadata selected",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Metadata failed",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Metadata selected": {
+        "main": [
+          [
+            {
               "node": "Start voice",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Metadata failed": {
+        "main": [
+          [
+            {
+              "node": "Metadata needs action",
               "type": "main",
               "index": 0
             }

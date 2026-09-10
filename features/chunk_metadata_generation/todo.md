@@ -14,9 +14,9 @@
 - [x] Confirm zero to two relevant emojis per platform metadata object.
 - [x] Select `gpt-5.6-luna` explicitly. Evidence: user decision on 2026-09-10
   and `features/_shared/decisions.md`.
-- [-] Record the measured fixture cost and per-campaign cost ceiling. Measured:
-  `$0.003704` for one whole-video result plus three chunk results. The operating
-  ceiling remains to be confirmed and enforced.
+- [x] Record measured cost and configure a `$0.02` soft per-campaign warning
+  without stopping work mid-campaign. Evidence: `$0.003704` for one whole-video
+  result plus three chunk results and metadata job cost-warning test.
 
 ## Data and service work
 
@@ -42,8 +42,13 @@
 
 ## Workflow and verification
 
-- [ ] Add `Start metadata`, `Wait metadata`, and `Metadata valid?` after `Chunked` and before voice/render.
-- [ ] Route exhausted failures to `needs_action` and Telegram notification.
+- [x] Add `Start metadata`, `Wait metadata`, and `Metadata valid?` after
+  `Chunked` and before voice/render in the canonical inactive workflow.
+  Evidence: `automation/workflows/tests/test_metadata_integration.py` and an
+  isolated n8n CLI import.
+- [x] Route exhausted failures to typed `needs_action` data and Telegram
+  notification while preserving successful peer items. Evidence: workflow
+  contract and metadata-service retry tests.
 - [x] Test one-, three-, and variable-chunk fixtures. Evidence: parametrized
   Docker generator test for 1, 3, and 4 chunks.
 - [-] Test invalid JSON, missing chunk, rate limit, timeout, transcript edit,

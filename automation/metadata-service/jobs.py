@@ -1,5 +1,6 @@
 import logging
 import os
+from decimal import Decimal
 
 import context
 import generator
@@ -51,6 +52,27 @@ def run(job_id: str, video_id: str, model: str) -> None:
             error="Metadata generation failed internally; retry the metadata stage.",
         )
     else:
+        usage = repository.revision_bundle(result["revision_id"])["usage"]
+        input_rate = Decimal(os.environ.get("OPENAI_INPUT_USD_PER_MILLION", "0.20"))
+        output_rate = Decimal(os.environ.get("OPENAI_OUTPUT_USD_PER_MILLION", "1.20"))
+        warning_threshold = Decimal(os.environ.get("METADATA_COST_WARNING_USD", "0.02"))
+        estimated_cost = (
+            Decimal(usage["input_tokens"]) * input_rate
+            + Decimal(usage["output_tokens"]) * output_rate
+        ) / Decimal(1_000_000)
+        result = {
+            **result,
+            "usage": usage,
+            "estimated_cost_usd": float(estimated_cost),
+        }
+        warnings = (
+            [
+                "Metadata cost warning: estimated cost "
+                f"${estimated_cost:.6f} reached the ${warning_threshold:.2f} threshold."
+            ]
+            if estimated_cost >= warning_threshold
+            else None
+        )
         state = "done" if result["state"] == "selected" else "failed"
         pipeline_db.finish_job(
             job_id,
@@ -61,6 +83,7 @@ def run(job_id: str, video_id: str, model: str) -> None:
                 else {**result, "error_code": "metadata_items_need_action", "retryable": True}
             ),
             error=None if state == "done" else "One or more metadata items need action.",
+            warnings=warnings,
         )
     _notify(job_id)
 

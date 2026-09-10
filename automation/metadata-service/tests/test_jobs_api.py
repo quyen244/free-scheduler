@@ -75,3 +75,35 @@ def test_background_job_records_typed_safe_metadata_failure(tmp_path, monkeypatc
     assert job["state"] == "failed"
     assert job["result"] == {"error_code": "translation_missing", "retryable": False}
     assert job["error"] == "Translation is not ready."
+
+
+def test_successful_job_adds_soft_cost_warning_without_stopping(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_db, "DB_PATH", tmp_path / "pipeline.db")
+    pipeline_db.init()
+    job_id = pipeline_db.create_job("aaaaaaaaaaa", "metadata")
+    monkeypatch.setattr(jobs.context, "load", lambda video_id: object())
+    monkeypatch.setattr(jobs, "ResponsesClient", lambda **kwargs: object())
+    monkeypatch.setattr(
+        jobs.generator,
+        "run",
+        lambda source, client: {
+            "revision_id": "revision-fixture",
+            "state": "selected",
+            "items": [],
+        },
+    )
+    monkeypatch.setattr(
+        jobs.repository,
+        "revision_bundle",
+        lambda revision_id: {
+            "usage": {"input_tokens": 10_000, "output_tokens": 2_000, "total_tokens": 12_000}
+        },
+    )
+    monkeypatch.setenv("METADATA_COST_WARNING_USD", "0.001")
+
+    jobs.run(job_id, "aaaaaaaaaaa", "gpt-5.6-luna")
+
+    job = pipeline_db.get_job(job_id)
+    assert job["state"] == "done"
+    assert job["result"]["estimated_cost_usd"] == 0.0044
+    assert len(job["warnings"]) == 1
