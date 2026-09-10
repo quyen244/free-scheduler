@@ -1,0 +1,20 @@
+{
+  "schema_version": "mock-brand.v1",
+  "brand_id": "mock-brand",
+  "display_name": "Mystery VN (Mock)",
+  "watermark": {
+    "text": "MYSTERY VN • MOCK",
+    "anchor": "top_right",
+    "margin_ratio": 0.035,
+    "font_size_ratio": 0.028,
+    "color": "#D4AF37",
+    "opacity": 0.72
+  },
+  "signature_music": {
+    "file": "mock-signature.wav",
+    "volume_db": -30.0,
+    "loop": true,
+    "fade_in_s": 0.75,
+    "fade_out_s": 1.0
+  }
+}

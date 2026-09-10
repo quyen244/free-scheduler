@@ -6,10 +6,12 @@ from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 import jobs
+import brand
 import library
 import voice
 from config import settings
 from errors import (
+    BrandConfigError,
     EmptyTranscriptError,
     InvalidVideoIdError,
     NoChunksError,
@@ -20,7 +22,12 @@ from errors import (
     UnknownVoiceError,
     VoiceTrackNotFoundError,
 )
-from schema import JobAccepted, RenderJobRequest, VoiceJobRequest
+from schema import (
+    JobAccepted,
+    MediaRevisionJobRequest,
+    RenderJobRequest,
+    VoiceJobRequest,
+)
 from shared import pipeline_db
 
 logging.basicConfig(level=logging.INFO)
@@ -58,6 +65,7 @@ for error, status in (
     (EmptyTranscriptError, 422),
     (SynthesisError, 502),
     (RenderError, 502),
+    (BrandConfigError, 422),
 ):
     app.add_exception_handler(error, _handler(status))
 
@@ -104,6 +112,37 @@ def create_render_job(request: RenderJobRequest, background: BackgroundTasks) ->
     job_id = pipeline_db.create_job(request.video_id, "render", request.callback_url)
     background.add_task(
         jobs.run_render, job_id, request.video_id, preset_name, request.only_chunk
+    )
+    return JobAccepted(job_id=job_id, video_id=request.video_id, state="queued")
+
+
+@app.post("/media-revision/jobs", response_model=JobAccepted, status_code=202)
+def create_media_revision_job(
+    request: MediaRevisionJobRequest, background: BackgroundTasks
+) -> JobAccepted:
+    library.load_preset(request.vertical_preset)
+    library.load_preset(request.landscape_preset)
+    library.load_voice_track(request.video_id)
+    if not pipeline_db.chunks_for(request.video_id):
+        raise NoChunksError(
+            f"no chunks for {request.video_id!r} — POST it to the transcript "
+            "service's /chunk first"
+        )
+    for brand_id in request.brand_ids:
+        brand.load(brand_id)
+
+    job_id = pipeline_db.create_job(
+        request.video_id, "media_revision", request.callback_url
+    )
+    background.add_task(
+        jobs.run_media_revision,
+        job_id,
+        request.video_id,
+        request.render_revision,
+        request.brand_ids,
+        request.vertical_preset,
+        request.landscape_preset,
+        request.metadata_revision_id,
     )
     return JobAccepted(job_id=job_id, video_id=request.video_id, state="queued")
 

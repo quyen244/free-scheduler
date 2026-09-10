@@ -422,6 +422,13 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_file(path: Path) -> str:
+    """Return integrity evidence for a required non-empty file."""
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise ManifestValidationError(f"required file is missing or empty: {path}")
+    return _sha256(path)
+
+
 def _atomic_write(path: Path, payload: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")

@@ -25,7 +25,15 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DB_PATH = Path(os.environ.get("PIPELINE_DB", str(DATA_DIR / "pipeline.db")))
 SCHEMA_PATH = DATA_DIR / "schema.sql"
 
-JOB_KINDS = ("ingest", "transcribe", "translate", "voice", "render", "metadata")
+JOB_KINDS = (
+    "ingest",
+    "transcribe",
+    "translate",
+    "voice",
+    "render",
+    "metadata",
+    "media_revision",
+)
 
 # A video only ever moves forward through these. See contracts.md.
 STAGE_ORDER = (

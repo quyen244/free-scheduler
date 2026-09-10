@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     video_id     TEXT NOT NULL,
     kind         TEXT NOT NULL
                  CHECK (kind IN ('ingest', 'transcribe', 'translate', 'voice',
-                                'render', 'metadata')),
+                                'render', 'metadata', 'media_revision')),
     state        TEXT NOT NULL DEFAULT 'queued'
                  CHECK (state IN ('queued', 'running', 'done', 'failed')),
     progress     REAL NOT NULL DEFAULT 0,

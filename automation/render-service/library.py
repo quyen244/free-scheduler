@@ -20,11 +20,14 @@ RAW_NAME = "raw.mp4"
 
 PRESETS_DIR = "presets"
 BACKGROUNDS_DIR = "backgrounds"
+BRANDS_DIR = "brands"
+MUSIC_DIR = "music"
 
 _VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 # Presets are named in a request and joined to a path, so the same rule
 # applies to them as to a video id.
 _PRESET_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_ASSET_FILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 def video_dir(video_id: str) -> Path:
@@ -111,3 +114,31 @@ def background_path(file_name: str) -> Path:
 
 def asset_path(file_name: str) -> Path:
     return presets_dir() / Path(file_name).name
+
+
+def brand_config_path(brand_id: str) -> Path:
+    """A version-controlled mock brand config below ``data/presets/brands``.
+
+    Durable brand profiles will later move into the application database.  For
+    this pipeline-correctness slice, keeping configuration with the render
+    presets makes the mock deterministic without allowing request data to pick
+    an arbitrary local file.
+    """
+    if not _PRESET_PATTERN.fullmatch(brand_id):
+        raise PresetNotFoundError(f"not a valid brand id: {brand_id!r}")
+    path = presets_dir() / BRANDS_DIR / f"{brand_id}.json"
+    if not path.is_file():
+        raise PresetNotFoundError(f"no mock brand config at {path}")
+    return path
+
+
+def music_path(file_name: str) -> Path:
+    """Resolve one allowlisted basename inside the shared ``data/music`` root."""
+    if not _ASSET_FILE_PATTERN.fullmatch(file_name):
+        raise PresetNotFoundError(f"not a valid music file name: {file_name!r}")
+    path = settings.data_dir / MUSIC_DIR / file_name
+    if not path.is_file():
+        raise PresetNotFoundError(
+            f"signature music is missing at {path}; add the configured file and retry"
+        )
+    return path

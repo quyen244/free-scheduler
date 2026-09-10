@@ -1,0 +1,38 @@
+{
+  "_comment": "Brand-neutral 1080x1920 chunk layout. It preserves the proven vertical geometry while leaving watermark and signature music to brand derivation.",
+  "canvas": { "w": 1080, "h": 1920 },
+  "background": "bg-mystery.png",
+  "video_rect": { "x": 0.0, "y": 0.28, "w": 1.0, "h": 0.44 },
+  "blur_regions": [
+    { "x": 0.02, "y": 0.86, "w": 0.30, "h": 0.10 }
+  ],
+  "subtitle": {
+    "y": 0.755,
+    "font": "DejaVu Sans",
+    "size": 46,
+    "color": "#FFFFFF",
+    "outline_color": "#000000",
+    "outline": 3,
+    "max_chars_per_line": 38,
+    "max_lines": 2
+  },
+  "caption_top": {
+    "y": 0.115,
+    "size": 62,
+    "color": "#FFFFFF",
+    "max_chars_per_line": 24
+  },
+  "caption_bottom": {
+    "y": 0.885,
+    "size": 54,
+    "color": "#D4AF37",
+    "max_chars_per_line": 28
+  },
+  "encode": {
+    "vcodec": "h264_nvenc",
+    "fallback_vcodec": "libx264",
+    "crf": 21,
+    "acodec": "aac",
+    "abr": "128k"
+  }
+}

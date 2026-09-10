@@ -18,6 +18,7 @@ from pathlib import Path
 import library
 import manifest as manifests
 import preset as presets
+import brand as brands
 import subs
 from errors import RenderError
 
@@ -349,6 +350,278 @@ def render_clean_whole(
         manifests.WHOLE_ITEM,
         expected_duration_s=source.duration_s,
         warnings=warnings,
+    )
+
+
+def render_clean_vertical(
+    video_id: str,
+    render_revision: int,
+    chunk: dict,
+    preset: dict,
+    segments: list[dict],
+    texts: dict[str, str] | None = None,
+    warnings: list[str] | None = None,
+) -> manifests.MediaAsset:
+    """Render one brand-neutral, revisioned 1080x1920 chunk master."""
+    canvas = preset.get("canvas") or {}
+    if (int(canvas.get("w", 0)), int(canvas.get("h", 0))) != (1080, 1920):
+        raise RenderError("clean vertical preset must use a 1080x1920 canvas")
+    if preset.get("logo") or (preset.get("watermark") or {}).get("text"):
+        raise RenderError("clean vertical preset cannot contain brand logo or watermark")
+
+    idx = int(chunk["idx"])
+    content_item_id = str(chunk.get("name") or f"part_{idx + 1}")
+    expected_name = f"part_{idx + 1}"
+    if content_item_id != expected_name:
+        raise RenderError(
+            f"chunk index {idx} must be named {expected_name!r}, not {content_item_id!r}"
+        )
+
+    start_s = float(chunk["start_s"])
+    end_s = float(chunk["end_s"])
+    duration_s = end_s - start_s
+    if duration_s <= 0:
+        raise RenderError(f"{content_item_id} has a non-positive duration")
+
+    raw = library.raw_path(video_id)
+    voice = library.load_voice_track(video_id)
+    source = probe(raw)
+    geometry = presets.resolve(preset, source.width, source.height)
+    output = manifests.expected_asset_path(
+        video_id, render_revision, "clean_vertical", content_item_id
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    subtitle_name = f"{content_item_id}.subs.ass"
+    within = segments_within(segments, start_s, end_s)
+    subs.write(
+        output.parent / subtitle_name,
+        subs.build(
+            within,
+            preset.get("subtitle") or {},
+            geometry.canvas_w,
+            geometry.canvas_h,
+            start_s,
+        ),
+    )
+
+    steps, video_label = _blur_chain(geometry.blur_regions, source)
+    box = geometry.video
+    steps.extend(
+        [
+            f"[{video_label}]scale={box.w}:{box.h},setsar=1[vid]",
+            f"[1:v]scale={geometry.canvas_w}:{geometry.canvas_h},setsar=1[bg]",
+            f"[bg][vid]overlay={box.x}:{box.y}[comp]",
+        ]
+    )
+    current = "comp"
+    family = str((preset.get("subtitle") or {}).get("font", "DejaVu Sans"))
+    for key in ("caption_top", "caption_bottom"):
+        value = str((texts or {}).get(key, "")).strip()
+        config = preset.get(key)
+        if not config or not value:
+            continue
+        textfile = _write_text(output.parent, f"{content_item_id}.{key}.txt", value)
+        nxt = f"{key}_out"
+        steps.append(f"[{current}]{_drawtext(config, textfile, geometry, family)}[{nxt}]")
+        current = nxt
+    steps.append(f"[{current}]ass={subtitle_name}[vout]")
+    steps.append("[2:a]apad[aout]")
+
+    partial = output.with_name(f"{content_item_id}-9x16.part.mp4")
+    command = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-ss",
+        f"{start_s:.3f}",
+        "-t",
+        f"{duration_s:.3f}",
+        "-i",
+        str(raw),
+        "-loop",
+        "1",
+        "-t",
+        f"{duration_s:.3f}",
+        "-i",
+        str(library.background_path(str(preset.get("background", "")))),
+        "-ss",
+        f"{start_s:.3f}",
+        "-t",
+        f"{duration_s:.3f}",
+        "-i",
+        str(voice),
+        "-filter_complex",
+        ";".join(steps),
+        "-map",
+        "[vout]",
+        "-map",
+        "[aout]",
+        *_encode_args(preset.get("encode") or {}),
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        str((preset.get("encode") or {}).get("abr", "128k")),
+        "-t",
+        f"{duration_s:.3f}",
+        "-movflags",
+        "+faststart",
+        str(partial),
+    ]
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=output.parent,
+        )
+    except subprocess.CalledProcessError as exc:
+        partial.unlink(missing_ok=True)
+        raise RenderError(
+            f"clean vertical render of {video_id}/{content_item_id}: "
+            f"{exc.stderr.strip()[-800:]}"
+        ) from exc
+
+    partial.replace(output)
+    return manifests.inspect_expected_asset(
+        video_id,
+        render_revision,
+        "clean_vertical",
+        content_item_id,
+        expected_duration_s=duration_s,
+        warnings=warnings,
+    )
+
+
+def render_branded_variant(
+    clean_asset: manifests.MediaAsset,
+    profile: brands.MockBrandProfile,
+    warnings: list[str] | None = None,
+) -> manifests.MediaAsset:
+    """Derive one brand-specific video from a validated clean master.
+
+    The mock music settings are deliberately a quiet, looped bed with short
+    fades. Speech-aware ducking is not enabled until its thresholds have been
+    calibrated against representative narration fixtures.
+    """
+    if clean_asset.role not in ("clean_whole", "clean_vertical"):
+        raise RenderError("a branded variant must derive from a clean asset")
+
+    branded_role: manifests.AssetRole = (
+        "branded_whole"
+        if clean_asset.role == "clean_whole"
+        else "branded_vertical"
+    )
+    output = manifests.expected_asset_path(
+        clean_asset.video_id,
+        clean_asset.render_revision,
+        branded_role,
+        clean_asset.content_item_id,
+        profile.brand_id,
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    clean_path = Path(clean_asset.path)
+    if not clean_path.is_file():
+        raise RenderError(f"clean lineage asset is missing: {clean_path}")
+
+    music = brands.music_path(profile)
+    duration_s = clean_asset.probe.duration_s
+    watermark = profile.watermark
+    min_dimension = min(clean_asset.probe.width, clean_asset.probe.height)
+    margin = max(int(round(min_dimension * watermark.margin_ratio)), 2)
+    font_size = max(int(round(min_dimension * watermark.font_size_ratio)), 12)
+    x = str(margin) if watermark.anchor.endswith("left") else f"w-text_w-{margin}"
+    y = str(margin) if watermark.anchor.startswith("top") else f"h-text_h-{margin}"
+    watermark_file = _write_text(
+        output.parent,
+        f"{clean_asset.content_item_id}.watermark.txt",
+        watermark.text,
+    )
+
+    fade_in = min(profile.signature_music.fade_in_s, duration_s / 2)
+    fade_out = min(profile.signature_music.fade_out_s, duration_s / 2)
+    fade_out_start = max(duration_s - fade_out, 0)
+    colour = watermark.color.lstrip("#")
+    font = presets.font_file("DejaVu Sans")
+    filtergraph = (
+        f"[0:v]drawtext=fontfile={font}:textfile={watermark_file}:"
+        f"fontsize={font_size}:fontcolor=0x{colour}@{watermark.opacity}:"
+        f"borderw={max(font_size // 18, 1)}:bordercolor=0x000000@{watermark.opacity}:"
+        f"x={x}:y={y}[vout];"
+        "[0:a]aresample=48000,asetpts=PTS-STARTPTS[speech];"
+        f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"volume={profile.signature_music.volume_db}dB,atrim=0:{duration_s:.3f},"
+        f"afade=t=in:st=0:d={fade_in:.3f},"
+        f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f},"
+        "asetpts=PTS-STARTPTS[music];"
+        "[speech][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+        "alimiter=limit=0.98[aout]"
+    )
+    partial = output.with_name(f".{output.stem}.part.mp4")
+    command = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        str(clean_path),
+        "-stream_loop",
+        "-1",
+        "-i",
+        str(music),
+        "-filter_complex",
+        filtergraph,
+        "-map",
+        "[vout]",
+        "-map",
+        "[aout]",
+        *_encode_args({"crf": 21}),
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k" if branded_role == "branded_whole" else "128k",
+        "-t",
+        f"{duration_s:.3f}",
+        "-movflags",
+        "+faststart",
+        str(partial),
+    ]
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=output.parent,
+        )
+    except subprocess.CalledProcessError as exc:
+        partial.unlink(missing_ok=True)
+        raise RenderError(
+            f"brand derivation of {clean_asset.content_item_id} for "
+            f"{profile.brand_id}: {exc.stderr.strip()[-800:]}"
+        ) from exc
+
+    partial.replace(output)
+    combined_warnings = [
+        "mock signature-music mix uses provisional -30 dB-style configuration; "
+        "speech ducking is pending fixture calibration",
+        *(warnings or []),
+    ]
+    return manifests.inspect_expected_asset(
+        clean_asset.video_id,
+        clean_asset.render_revision,
+        branded_role,
+        clean_asset.content_item_id,
+        expected_duration_s=duration_s,
+        brand_id=profile.brand_id,
+        lineage_asset_id=clean_asset.asset_id,
+        warnings=combined_warnings,
     )
 
 

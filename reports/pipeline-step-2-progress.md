@@ -67,6 +67,18 @@ Implemented:
 - Direct clean YouTube renderer and `yt-landscape` preset produce 1920x1080
   from the complete `raw.mp4`, with Vietnamese voice and burned subtitles,
   without concatenating vertical chunks.
+- Revisioned `/media-revision/jobs` production path produces the complete
+  clean/branded manifest topology independently of the legacy `/render/jobs`
+  endpoint.
+- Clean vertical chunk masters are written as
+  `outputs/clean/revision/<render_revision>/vertical/part_<n>-9x16.mp4`.
+- Mock-brand derivation writes brand-owned 16:9 and 9:16 variants with a
+  configured watermark and local signature-music bed.
+- Same-brand Facebook and TikTok can reuse the same branded vertical file
+  because branded vertical paths are keyed by brand, revision, and part, not by
+  platform.
+- Safe same-revision retry reuses the immutable ready manifest and already
+  verified assets instead of re-encoding.
 
 ## Verification
 
@@ -84,9 +96,22 @@ Implemented:
   `40 passed`.
   The manifest cases generate short real FFmpeg media and inspect it with real
   `ffprobe`.
+- Render-service media-revision subset: `20 passed` for `test_manifest.py`,
+  `test_clean_landscape.py`, and `test_clean_vertical_and_brand.py`.
+- Render-service model-free contract suite: `45 passed, 59 deselected` with
+  `pytest -q -m no_pipeline`.
 - The existing 19-second fixture produced H.264 1920x1080 plus AAC audio and
   was visually inspected at six seconds for preserved aspect ratio and readable
   Vietnamese subtitles.
+- The 19-second fixture also passed the new production endpoint:
+  `/media-revision/jobs` job `f4f842d3e00c4288a3c5fa464351ed94`, render
+  revision 3, state `ready`, 4 assets, 0 failures. It wrote a clean whole
+  asset, a clean `part_1` vertical asset, a branded whole asset, and a branded
+  `part_1` vertical asset. Same-revision retry job
+  `cd9b3b170c204875afcfc59ece35c068` reused the ready manifest.
+- Representative frame evidence:
+  `reports/step2-revision3-branded-whole-frame.jpg` and
+  `reports/step2-revision3-branded-part1-frame.jpg`.
 - Reference results: 5:00 -> 1, 9:00 -> 1, 10:00 -> 2,
   13:42 -> 3, 20:00 -> 4.
 - Installed SQLite database was migrated in place; existing `n8n_data` was not
@@ -111,8 +136,12 @@ No rights marker or additional data field is required.
   stage. Duplicate active metadata job reuse is implemented and tested.
 - Explicitly reviewed import of the 36-node canonical JSON into the inactive
   live workflow. It was not imported automatically.
-- Clean 1920x1080 whole render and clean 1080x1920 chunk renders.
-- Mock-brand watermark/signature-music variants.
-- Wire the versioned manifest validator into production render completion. The
-  schema, stable paths, probes, hashes, and atomic persistence are implemented.
-- Docker end-to-end fixtures and representative frame inspection.
+- Full-length 5-, 9-, 10-, 13:42-, and 20-minute render fixture matrix. The
+  short production endpoint and two-part automated fixture are verified; the
+  11-minute run on this host falls back to CPU `libx264` and is too slow for a
+  routine turn.
+- Wire the new media-revision endpoint into the reviewed canonical n8n JSON and
+  explicitly review/import the inactive live workflow when ready.
+- Calibrate signature-music loudness, speech ducking, looping, and fades
+  against representative fixtures. Current mock mix is intentionally
+  provisional and emits a warning.

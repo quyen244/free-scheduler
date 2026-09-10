@@ -14,10 +14,15 @@
 
 ## Mock pipeline profile
 
-- [ ] Add an allowlisted `data/music/` convention without committing unlicensed music.
-- [ ] Add one mock brand preset referencing placeholder watermark and music paths.
-- [ ] Validate brand paths remain inside the mounted media/preset roots.
-- [ ] Render mock-branded 16:9 and 9:16 fixtures.
+- [x] Add an allowlisted `data/music/` convention without committing unlicensed music.
+  Evidence: `library.music_path()` allows only a basename under `/data/music`;
+  `mock-signature.wav` is generated locally and remains git-ignored.
+- [x] Add one mock brand preset referencing placeholder watermark and music paths.
+  Evidence: `data/presets/brands/mock-brand.json`.
+- [x] Validate brand paths remain inside the mounted media/preset roots.
+  Evidence: `test_brand_music_path_cannot_escape_allowlisted_folder`.
+- [x] Render mock-branded 16:9 and 9:16 fixtures. Evidence:
+  `/media-revision/jobs` fixture job `f4f842d3e00c4288a3c5fa464351ed94`.
 
 ## Durable app model
 

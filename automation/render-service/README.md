@@ -11,9 +11,11 @@ and not another twenty minutes of synthesis.
 
 - `POST /voice/jobs` — ZeroTTS per Whisper segment, fitted to the slot Whisper
   measured. Writes `data/<video_id>/voice.wav` and `voice.json`.
-- `POST /render/jobs` — blur, background composite, logo, watermark, burned
-  subtitles, the voice track under it. Writes
+- `POST /render/jobs` — legacy vertical render path. It writes
   `data/<video_id>/chunks/<NNN>/final.mp4` and `processed/final.mp4`.
+- `POST /media-revision/jobs` — current delivery-contract path. It writes
+  revisioned clean masters, derives mock-branded variants, probes every output,
+  and publishes `media-manifest.json` only after validation.
 
 ## Running it
 
@@ -178,14 +180,54 @@ Numbers in `reports/tts-spike.md` and `reports/benchmark-after.md`.
 
 ## The render half
 
-### Revisioned media contract under construction
+### `POST /media-revision/jobs`
 
-`manifest.py` defines the new `media-manifest.v1` delivery contract and safe,
-revisioned output paths. `yt-landscape.json` plus `render_clean_whole()` now
-produce a complete 1920x1080 clean YouTube asset directly from `raw.mp4`; they
-do not concatenate vertical chunks. This primitive is Docker-tested, but the
-existing `/render/jobs` endpoint still runs the legacy vertical-only flow until
-the clean vertical and mock-brand derivations are added.
+```bash
+curl -X POST http://127.0.0.1:8003/media-revision/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"video_id": "3gi_15UH9fQ", "render_revision": 1, "brand_ids": ["mock-brand"]}'
+```
+
+This is the current delivery-contract render path. It reads the source media,
+voice track, transcript, and database chunk rows; renders a clean 1920x1080
+whole master plus every clean 1080x1920 `part_<n>` master; then derives one
+branded 16:9 asset and one branded 9:16 asset per chunk for every selected
+mock brand.
+
+The endpoint validates presets, chunk rows, the voice track, brand config, and
+configured signature music before a job is accepted. Successful jobs return the
+manifest paths and full asset evidence: asset ID, path, SHA-256, byte count,
+duration, dimensions, codecs, brand ID, lineage asset ID, and warnings.
+
+Outputs follow the manifest contract:
+
+```text
+data/<video_id>/
+|-- outputs/clean/revision/<render_revision>/
+|   |-- whole-16x9.mp4
+|   `-- vertical/part_<n>-9x16.mp4
+|-- outputs/brands/<brand_id>/revision/<render_revision>/
+|   |-- whole-16x9.mp4
+|   `-- vertical/part_<n>-9x16.mp4
+|-- manifests/revision/<render_revision>.json
+`-- media-manifest.json
+```
+
+A same-brand Facebook and TikTok target reuse the same branded vertical file.
+Different brands write different `outputs/brands/<brand_id>/...` paths and may
+use different signature music.
+
+The mock music convention is allowlisted to `/data/music/<basename>`. Generate
+the local non-copyrighted fixture with:
+
+```bash
+docker compose run --rm -e PYTHONPATH=/app -w /app render-service \
+  python create_mock_brand_assets.py
+```
+
+The mock mix is intentionally conservative: quiet looped background music with
+short fades. Speech-aware ducking remains pending fixture calibration and is
+reported as a warning in the manifest.
 
 ### `POST /render/jobs`
 

@@ -37,3 +37,7 @@ class PresetNotFoundError(Exception):
 
 class RenderError(Exception):
     """ffmpeg refused a clip."""
+
+
+class BrandConfigError(Exception):
+    """A selected mock brand profile is malformed or inconsistent."""

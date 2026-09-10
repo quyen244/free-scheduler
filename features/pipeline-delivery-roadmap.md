@@ -107,8 +107,9 @@ Goal: make the local production path correct from input validation through
 metadata, branded rendering, and media output.
 
 Status: in progress. Source preflight, balanced chunk planning, metadata
-generation, and the canonical n8n metadata gate are verified; two-ratio
-render/manifest work remains.
+generation, the canonical n8n metadata gate, and the revisioned clean/branded
+media job are verified; the full-length fixture matrix and live n8n render
+wiring remain.
 
 - [ ] Complete [Source ingest and validation](source_ingest_validation/todo.md).
 - [ ] Complete [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md).
@@ -122,22 +123,35 @@ render/manifest work remains.
 - [x] Persist stable `part_<n>` names and transcript-boundary shift evidence.
 - [x] Add typed source validation with duration, readability,
   resolution, `ffprobe`, and SHA-256 checks before transcription.
-- [-] Produce the revisioned `whole-16x9.mp4` as a real landscape render. The
-  direct renderer and preset pass a real 19-second fixture; production job and
-  n8n wiring remain.
+- [x] Produce the revisioned `whole-16x9.mp4` as a real landscape render.
+  Evidence: `/media-revision/jobs` fixture job
+  `f4f842d3e00c4288a3c5fa464351ed94` wrote
+  `/data/jNQXAC9IVRw/outputs/clean/revision/3/whole-16x9.mp4`.
 - [-] Never use a concatenation of vertical chunks as the YouTube asset. The
   new renderer reads `raw.mp4` directly; the current n8n render node still uses
   the legacy endpoint until the variant job is ready.
-- [ ] Produce `N` clean vertical chunk masters.
-- [ ] Derive branded 16:9 and 9:16 variants with mock watermark/signature music.
-- [ ] Let same-brand Facebook and TikTok reference the same physical vertical asset.
-- [-] Preserve stable asset IDs and paths across safe retries. Deterministic
-  revision-scoped IDs and paths are tested; production render jobs are not yet
-  writing them.
+- [x] Produce `N` clean vertical chunk masters. Evidence:
+  `test_complete_revision_creates_every_part_and_reuses_same_brand_verticals`
+  covers two parts; the 19-second fixture wrote
+  `/data/jNQXAC9IVRw/outputs/clean/revision/3/vertical/part_1-9x16.mp4`.
+- [x] Derive branded 16:9 and 9:16 variants with mock watermark/signature music.
+  Evidence: `/media-revision/jobs` fixture job
+  `f4f842d3e00c4288a3c5fa464351ed94` wrote both mock-brand variants with
+  H.264/AAC probe evidence and zero failures.
+- [x] Let same-brand Facebook and TikTok reference the same physical vertical
+  asset. Evidence:
+  `test_complete_revision_creates_every_part_and_reuses_same_brand_verticals`
+  asserts branded vertical paths are brand-level paths, not platform-specific
+  Facebook/TikTok paths.
+- [x] Preserve stable asset IDs and paths across safe retries. Evidence:
+  same-revision retry job `cd9b3b170c204875afcfc59ece35c068` completed with
+  the existing ready manifest and four assets.
 - [ ] Test 5-, 9-, 10-, 13:42-, and 20-minute fixtures inside Docker.
 - [ ] Test OpenAI transient failure and one corrupt-render recovery without
   repeating successful stages.
-- [ ] Inspect representative frames from both layouts.
+- [x] Inspect representative frames from both layouts. Evidence:
+  `reports/step2-revision3-branded-whole-frame.jpg` and
+  `reports/step2-revision3-branded-part1-frame.jpg`.
 
 Expected output:
 
@@ -163,6 +177,21 @@ Evidence:
 - [Metadata model fixture](../reports/metadata-model-fixture-2026-09-10.md)
 - [n8n metadata integration](../reports/n8n-metadata-integration-step-2.md)
 - [Media manifest contract](../reports/media-manifest-contract-step-2.md)
+- Render-service media revision Docker subset:
+  `docker compose run --rm -e PYTHONPATH=/app -w /app render-service python -m pytest -q tests/test_manifest.py tests/test_clean_landscape.py tests/test_clean_vertical_and_brand.py`
+  - 20 tests passed on September 10, 2026.
+- Render-service model-free contract suite:
+  `docker compose run --rm -e PYTHONPATH=/app -w /app render-service python -m pytest -q -m no_pipeline`
+  - 45 tests passed, 59 deselected on September 10, 2026.
+- Short fixture production endpoint:
+  `/media-revision/jobs` for `jNQXAC9IVRw`, render revision 3, job
+  `f4f842d3e00c4288a3c5fa464351ed94`: ready manifest, 4 assets, 0 failures.
+- Same-revision retry:
+  job `cd9b3b170c204875afcfc59ece35c068`: reused existing ready manifest,
+  4 assets, 0 failures.
+- Frame evidence:
+  `reports/step2-revision3-branded-whole-frame.jpg` and
+  `reports/step2-revision3-branded-part1-frame.jpg`.
 
 Done when: a three-chunk source creates valid selected metadata, clean masters,
 and mock-branded landscape/vertical variants without ambiguous filenames or

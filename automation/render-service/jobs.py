@@ -9,7 +9,9 @@ later, the same shape ingest and translation use.
 import logging
 
 import library
+import manifest
 import render
+import variants
 import voice
 from errors import NoChunksError, RenderError
 from shared import callbacks, pipeline_db
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 # The kinds this service performs, and therefore the only ones it may declare
 # dead on startup. A service that reaped every unfinished row would kill the
 # other services' live jobs every time it restarted.
-OWNED_KINDS = ("voice", "render")
+OWNED_KINDS = ("voice", "render", "media_revision")
 
 
 def reap_orphans() -> None:
@@ -90,6 +92,60 @@ def run_render(job_id: str, video_id: str, preset_name: str, only_chunk: int | N
     else:
         pipeline_db.finish_job(job_id, "done", result=result, warnings=warnings)
 
+    _notify(job_id)
+
+
+def run_media_revision(
+    job_id: str,
+    video_id: str,
+    render_revision: int,
+    brand_ids: list[str],
+    vertical_preset: str,
+    landscape_preset: str,
+    metadata_revision_id: str | None,
+) -> None:
+    """Build the complete revision and always leave a pollable/callback result."""
+    pipeline_db.mark_running(job_id)
+    try:
+        media_manifest = variants.render_media_revision(
+            video_id,
+            render_revision,
+            brand_ids=brand_ids,
+            vertical_preset_name=vertical_preset,
+            landscape_preset_name=landscape_preset,
+            metadata_revision_id=metadata_revision_id,
+            on_progress=lambda done: pipeline_db.set_progress(job_id, done),
+        )
+    except Exception as exc:  # worker boundary; every failure must call back
+        logger.exception("media revision job %s failed", job_id)
+        pipeline_db.finish_job(job_id, "failed", error=f"{type(exc).__name__}: {exc}")
+    else:
+        result = {
+            "video_id": video_id,
+            "render_revision": render_revision,
+            "manifest_state": media_manifest.state,
+            "manifest_path": str(manifest.current_manifest_path(video_id)),
+            "revision_manifest_path": str(
+                manifest.manifest_revision_path(video_id, render_revision)
+            ),
+            "asset_count": len(media_manifest.assets),
+            "failure_count": len(media_manifest.failures),
+            "assets": [asset.model_dump(mode="json") for asset in media_manifest.assets],
+            "failures": [failure.model_dump(mode="json") for failure in media_manifest.failures],
+        }
+        if media_manifest.state == "ready":
+            pipeline_db.advance_stage(video_id, "rendered")
+            pipeline_db.finish_job(
+                job_id, "done", result=result, warnings=media_manifest.warnings
+            )
+        else:
+            pipeline_db.finish_job(
+                job_id,
+                "failed",
+                result=result,
+                error="media revision needs action; inspect its typed failures",
+                warnings=media_manifest.warnings,
+            )
     _notify(job_id)
 
 

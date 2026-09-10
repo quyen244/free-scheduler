@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VoiceJobRequest(BaseModel):
@@ -24,3 +24,17 @@ class JobAccepted(BaseModel):
     job_id: str
     video_id: str
     state: str
+
+
+class MediaRevisionJobRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    video_id: str
+    render_revision: int = Field(ge=1)
+    brand_ids: list[str] = Field(
+        default_factory=lambda: ["mock-brand"], min_length=1, max_length=10
+    )
+    vertical_preset: str = "vertical-clean"
+    landscape_preset: str = "yt-landscape"
+    metadata_revision_id: str | None = None
+    callback_url: str | None = None
