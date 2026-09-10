@@ -16,6 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import library
+import manifest as manifests
 import preset as presets
 import subs
 from errors import RenderError
@@ -252,6 +253,103 @@ def render_chunk(
         "height": rendered.height,
         "bytes": output.stat().st_size,
     }
+
+
+def render_clean_whole(
+    video_id: str,
+    render_revision: int,
+    preset: dict,
+    segments: list[dict],
+    warnings: list[str] | None = None,
+) -> manifests.MediaAsset:
+    """Render the complete source directly to the clean YouTube asset.
+
+    This deliberately does not concatenate vertical chunks. The source video
+    is scaled once into a 1920x1080 canvas, the Vietnamese voice replaces the
+    source audio, and subtitles are burned against the whole timeline.
+    Branding and signature music are later derivations of this clean master.
+    """
+    canvas = preset.get("canvas") or {}
+    if (int(canvas.get("w", 0)), int(canvas.get("h", 0))) != (1920, 1080):
+        raise RenderError("clean whole preset must use a 1920x1080 canvas")
+
+    raw = library.raw_path(video_id)
+    voice = library.load_voice_track(video_id)
+    source = probe(raw)
+    output = manifests.expected_asset_path(
+        video_id, render_revision, "clean_whole", manifests.WHOLE_ITEM
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    subtitle_name = "whole-16x9.subs.ass"
+    subs.write(
+        output.parent / subtitle_name,
+        subs.build(
+            segments,
+            preset.get("subtitle") or {},
+            1920,
+            1080,
+        ),
+    )
+
+    partial = output.with_name("whole-16x9.part.mp4")
+    filtergraph = (
+        "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,"
+        "setsar=1,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,"
+        f"ass={subtitle_name}[vout];[1:a]apad[aout]"
+    )
+    command = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        str(raw),
+        "-i",
+        str(voice),
+        "-filter_complex",
+        filtergraph,
+        "-map",
+        "[vout]",
+        "-map",
+        "[aout]",
+        *_encode_args(preset.get("encode") or {}),
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        str((preset.get("encode") or {}).get("abr", "192k")),
+        "-t",
+        f"{source.duration_s:.3f}",
+        "-movflags",
+        "+faststart",
+        str(partial),
+    ]
+
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=output.parent,
+        )
+    except subprocess.CalledProcessError as exc:
+        partial.unlink(missing_ok=True)
+        raise RenderError(
+            f"clean whole render of {video_id}: {exc.stderr.strip()[-800:]}"
+        ) from exc
+
+    partial.replace(output)
+    return manifests.inspect_expected_asset(
+        video_id,
+        render_revision,
+        "clean_whole",
+        manifests.WHOLE_ITEM,
+        expected_duration_s=source.duration_s,
+        warnings=warnings,
+    )
 
 
 def segments_within(segments: list[dict], start_s: float, end_s: float) -> list[dict]:

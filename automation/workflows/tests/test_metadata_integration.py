@@ -24,6 +24,12 @@ class MetadataWorkflowContractTests(unittest.TestCase):
         self.assertEqual(len(self.workflow["nodes"]), 36)
         ids = [node["id"] for node in self.workflow["nodes"]]
         self.assertEqual(len(ids), len(set(ids)))
+        webhook_ids = [
+            node["webhookId"]
+            for node in self.workflow["nodes"]
+            if node.get("webhookId")
+        ]
+        self.assertEqual(len(webhook_ids), len(set(webhook_ids)))
         self.assertEqual(len(self.nodes), len(self.workflow["nodes"]))
 
     def test_every_connection_references_a_real_node(self):

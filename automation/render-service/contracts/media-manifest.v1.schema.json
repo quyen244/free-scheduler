@@ -1,0 +1,289 @@
+{
+  "$defs": {
+    "ManifestFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Asset Id"
+        },
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "title": "ManifestFailure",
+      "type": "object"
+    },
+    "MediaAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "pattern": "^[a-f0-9]{32}$",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "video_id": {
+          "pattern": "^[A-Za-z0-9_-]{11}$",
+          "title": "Video Id",
+          "type": "string"
+        },
+        "render_revision": {
+          "minimum": 1,
+          "title": "Render Revision",
+          "type": "integer"
+        },
+        "role": {
+          "enum": [
+            "clean_whole",
+            "clean_vertical",
+            "branded_whole",
+            "branded_vertical"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "content_item_id": {
+          "title": "Content Item Id",
+          "type": "string"
+        },
+        "brand_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brand Id"
+        },
+        "lineage_asset_id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lineage Asset Id"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "bytes": {
+          "exclusiveMinimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "probe": {
+          "$ref": "#/$defs/ProbeEvidence"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "asset_id",
+        "video_id",
+        "render_revision",
+        "role",
+        "content_item_id",
+        "path",
+        "sha256",
+        "bytes",
+        "probe"
+      ],
+      "title": "MediaAsset",
+      "type": "object"
+    },
+    "ProbeEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "duration_s": {
+          "exclusiveMinimum": 0,
+          "title": "Duration S",
+          "type": "number"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "integer"
+        },
+        "video_codec": {
+          "minLength": 1,
+          "title": "Video Codec",
+          "type": "string"
+        },
+        "audio_codec": {
+          "minLength": 1,
+          "title": "Audio Codec",
+          "type": "string"
+        },
+        "has_video": {
+          "const": true,
+          "default": true,
+          "title": "Has Video",
+          "type": "boolean"
+        },
+        "has_audio": {
+          "const": true,
+          "default": true,
+          "title": "Has Audio",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "duration_s",
+        "width",
+        "height",
+        "video_codec",
+        "audio_codec"
+      ],
+      "title": "ProbeEvidence",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "media-manifest.v1",
+      "default": "media-manifest.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "video_id": {
+      "pattern": "^[A-Za-z0-9_-]{11}$",
+      "title": "Video Id",
+      "type": "string"
+    },
+    "render_revision": {
+      "minimum": 1,
+      "title": "Render Revision",
+      "type": "integer"
+    },
+    "metadata_revision_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Metadata Revision Id"
+    },
+    "source_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Source Sha256",
+      "type": "string"
+    },
+    "state": {
+      "enum": [
+        "building",
+        "validating",
+        "ready",
+        "needs_action",
+        "stale"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "chunk_names": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Chunk Names",
+      "type": "array"
+    },
+    "brand_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Brand Ids",
+      "type": "array"
+    },
+    "assets": {
+      "items": {
+        "$ref": "#/$defs/MediaAsset"
+      },
+      "title": "Assets",
+      "type": "array"
+    },
+    "failures": {
+      "items": {
+        "$ref": "#/$defs/ManifestFailure"
+      },
+      "title": "Failures",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "video_id",
+    "render_revision",
+    "source_sha256",
+    "state",
+    "chunk_names",
+    "brand_ids",
+    "assets"
+  ],
+  "title": "MediaManifest",
+  "type": "object"
+}

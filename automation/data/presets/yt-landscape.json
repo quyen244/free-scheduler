@@ -1,0 +1,23 @@
+{
+  "_comment": "Clean whole-video YouTube layout. Branding and signature music are applied in a later derivation.",
+  "canvas": { "w": 1920, "h": 1080 },
+  "video_rect": { "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0 },
+  "blur_regions": [],
+  "subtitle": {
+    "y": 0.88,
+    "font": "DejaVu Sans",
+    "size": 42,
+    "color": "#FFFFFF",
+    "outline_color": "#000000",
+    "outline": 3,
+    "max_chars_per_line": 58,
+    "max_lines": 2
+  },
+  "encode": {
+    "vcodec": "h264_nvenc",
+    "fallback_vcodec": "libx264",
+    "crf": 21,
+    "acodec": "aac",
+    "abr": "192k"
+  }
+}

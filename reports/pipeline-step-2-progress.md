@@ -53,6 +53,20 @@ Implemented:
   a read-only whole-video plus three-chunk fixture passed. The representative
   run used 10,048 input and 1,412 output tokens (`$0.003704` estimated) with
   `reasoning.effort: none`.
+- Canonical n8n metadata integration adds six nodes between `Chunked` and
+  `Start voice`: start, wait, two-condition validity gate, selected state,
+  typed failure state, and operator-action Telegram notification.
+- Metadata jobs calculate token cost using configured Luna rates and add a
+  soft warning at `$0.02`; the warning never stops a campaign mid-generation.
+- Versioned `media-manifest.v1` schema, deterministic revision-scoped asset
+  IDs, safe clean/branded paths, immutable revision files, and an atomic
+  current-manifest pointer.
+- Real `ffprobe`/SHA-256 validation primitives reject missing or empty files,
+  missing audio/video streams, wrong 16:9 or 9:16 dimensions, duration drift,
+  and non-H.264/AAC output before a revision can become ready.
+- Direct clean YouTube renderer and `yt-landscape` preset produce 1920x1080
+  from the complete `raw.mp4`, with Vietnamese voice and burned subtitles,
+  without concatenating vertical chunks.
 
 ## Verification
 
@@ -62,8 +76,17 @@ Implemented:
 - Metadata service schemas, Responses request contract, revision persistence,
   selective retry, cached reuse, transcript-change invalidation, and restart
   recovery, duplicate-job reuse, safe renderer handoff, and 1/3/4-chunk
-  fixtures and typed API failures: `35 passed` inside Docker. Shared callback
-  regression tests: `2 passed`.
+  fixtures, typed API failures, and soft cost warnings: `36 passed` inside
+  Docker. Shared callback regression tests: `2 passed`.
+- Canonical workflow metadata contract: `7 passed`; isolated n8n CLI import:
+  successful with 36 nodes and `active: false`.
+- Render-service manifest, landscape, concat, and voice-pool Docker subset:
+  `40 passed`.
+  The manifest cases generate short real FFmpeg media and inspect it with real
+  `ffprobe`.
+- The existing 19-second fixture produced H.264 1920x1080 plus AAC audio and
+  was visually inspected at six seconds for preserved aspect ratio and readable
+  Vietnamese subtitles.
 - Reference results: 5:00 -> 1, 9:00 -> 1, 10:00 -> 2,
   13:42 -> 3, 20:00 -> 4.
 - Installed SQLite database was migrated in place; existing `n8n_data` was not
@@ -86,10 +109,10 @@ No rights marker or additional data field is required.
 
 - Durable resume-existing and force-new-campaign actions outside the metadata
   stage. Duplicate active metadata job reuse is implemented and tested.
-- n8n metadata job/wait/validation nodes.
-- Final metadata cost ceiling and enforcement. The representative three-chunk
-  cost fixture is recorded.
+- Explicitly reviewed import of the 36-node canonical JSON into the inactive
+  live workflow. It was not imported automatically.
 - Clean 1920x1080 whole render and clean 1080x1920 chunk renders.
 - Mock-brand watermark/signature-music variants.
-- Versioned manifest with `ffprobe`, streams, hashes, warnings, and completion gate.
+- Wire the versioned manifest validator into production render completion. The
+  schema, stable paths, probes, hashes, and atomic persistence are implemented.
 - Docker end-to-end fixtures and representative frame inspection.

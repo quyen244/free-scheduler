@@ -4,10 +4,12 @@ n8n workflow JSON, in version control. Mounted read-only into the n8n container
 at `/workflows`. The editor is where workflows change; this directory is where
 they are recorded, and a two-way sync would only fight itself.
 
-`reup-pipeline.json` is the canonical export of the latest reviewed live
-workflow. Files named `f3` through `f7` are historical phase snapshots. Do not
-import a phase snapshot over the canonical or live workflow unless rollback to
-that exact phase is intentional.
+`reup-pipeline.json` is the reviewed canonical candidate. It contains the Step
+2 metadata gate and is newer than the inactive workflow in the live n8n
+database. Review the recorded differences before an explicit import. Files
+named `f3` through `f7` are historical phase snapshots. Do not import a phase
+snapshot over the canonical or live workflow unless rollback to that exact
+phase is intentional.
 
 ```bash
 docker compose exec -T n8n n8n import:workflow --input=/workflows/reup-pipeline.json

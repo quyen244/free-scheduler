@@ -178,6 +178,15 @@ Numbers in `reports/tts-spike.md` and `reports/benchmark-after.md`.
 
 ## The render half
 
+### Revisioned media contract under construction
+
+`manifest.py` defines the new `media-manifest.v1` delivery contract and safe,
+revisioned output paths. `yt-landscape.json` plus `render_clean_whole()` now
+produce a complete 1920x1080 clean YouTube asset directly from `raw.mp4`; they
+do not concatenate vertical chunks. This primitive is Docker-tested, but the
+existing `/render/jobs` endpoint still runs the legacy vertical-only flow until
+the clean vertical and mock-brand derivations are added.
+
 ### `POST /render/jobs`
 
 ```bash

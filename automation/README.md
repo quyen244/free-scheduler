@@ -30,9 +30,10 @@ https://youtu.be/VIDEO_ID
 The workflow extracts the first URL from the message and rejects input without
 a URL. No rights marker or additional input field is required.
 
-The canonical Git export is `workflows/reup-pipeline.json`. Export the live
-database workflow before editing this file, and review differences before an
-import. To import the reviewed canonical file:
+The reviewed canonical Git candidate is `workflows/reup-pipeline.json`. It is
+currently newer than the inactive workflow in the live n8n database. Export
+the live database workflow before editing this file, and review differences
+before an import. To import the reviewed canonical file:
 
 ```powershell
 docker compose exec -T n8n n8n import:workflow --input=/workflows/reup-pipeline.json

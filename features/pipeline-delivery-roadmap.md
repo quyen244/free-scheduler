@@ -35,8 +35,9 @@ Verified on September 9, 2026:
 - [x] Use Vietnamese metadata with curiosity-driven, engaging,
   never-misleading copy and at most two relevant emojis per platform object.
 - [x] Use a cost-first fixture evaluation to select the OpenAI model.
-- [ ] Record the selected OpenAI model and per-campaign cost ceiling after the
-  fixture evaluation.
+- [x] Use `gpt-5.6-luna` with `reasoning.effort: none`; warn at an estimated
+  `$0.02` per campaign without stopping work midway. The representative
+  whole-video plus three-chunk fixture cost `$0.003704`.
 - [ ] Calibrate signature-music loudness, speech ducking, looping, fade, and
   missing-file behavior against a fixture.
 - [ ] Confirm Shopee Affiliate Open API `app_id` and `secret_key` availability.
@@ -105,26 +106,34 @@ without calling an external platform.
 Goal: make the local production path correct from input validation through
 metadata, branded rendering, and media output.
 
-Status: in progress. Source preflight and balanced chunk planning are verified;
-metadata and two-ratio render/manifest work remain.
+Status: in progress. Source preflight, balanced chunk planning, metadata
+generation, and the canonical n8n metadata gate are verified; two-ratio
+render/manifest work remains.
 
 - [ ] Complete [Source ingest and validation](source_ingest_validation/todo.md).
 - [ ] Complete [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md).
 - [ ] Complete the mock-profile work in [Brand profiles](brand_profiles/todo.md).
 - [ ] Complete [Media variants and manifest](media_variants_manifest/todo.md).
-- [ ] Insert metadata generation after `Chunked` and before voice/render.
+- [x] Insert metadata generation after `Chunked` and before voice/render in the
+  reviewed canonical JSON. Live import remains intentionally pending.
 - [x] Define and Docker-test strict `metadata.v1` schemas for one YouTube result
   and each chunk's visual, Facebook, and TikTok metadata.
 - [x] Replace greedy four-minute chunking with the accepted balanced policy.
 - [x] Persist stable `part_<n>` names and transcript-boundary shift evidence.
 - [x] Add typed source validation with duration, readability,
   resolution, `ffprobe`, and SHA-256 checks before transcription.
-- [ ] Produce `outputs/youtube/whole-16x9.mp4` as a real landscape render.
-- [ ] Never use a concatenation of vertical chunks as the YouTube asset.
+- [-] Produce the revisioned `whole-16x9.mp4` as a real landscape render. The
+  direct renderer and preset pass a real 19-second fixture; production job and
+  n8n wiring remain.
+- [-] Never use a concatenation of vertical chunks as the YouTube asset. The
+  new renderer reads `raw.mp4` directly; the current n8n render node still uses
+  the legacy endpoint until the variant job is ready.
 - [ ] Produce `N` clean vertical chunk masters.
 - [ ] Derive branded 16:9 and 9:16 variants with mock watermark/signature music.
 - [ ] Let same-brand Facebook and TikTok reference the same physical vertical asset.
-- [ ] Preserve stable asset IDs and paths across safe retries.
+- [-] Preserve stable asset IDs and paths across safe retries. Deterministic
+  revision-scoped IDs and paths are tested; production render jobs are not yet
+  writing them.
 - [ ] Test 5-, 9-, 10-, 13:42-, and 20-minute fixtures inside Docker.
 - [ ] Test OpenAI transient failure and one corrupt-render recovery without
   repeating successful stages.
@@ -136,8 +145,9 @@ Expected output:
 data/<video_id>/
 |-- outputs/
 |   |-- clean/
-|   |   |-- whole-16x9.mp4
-|   |   `-- vertical/part_<n>-9x16.mp4
+|   |   `-- revision/<render_revision>/
+|   |       |-- whole-16x9.mp4
+|   |       `-- vertical/part_<n>-9x16.mp4
 |   `-- brands/<brand_id>/revision/<n>/
 |       |-- whole-16x9.mp4
 |       `-- vertical/part_<n>-9x16.mp4
@@ -149,7 +159,10 @@ data/<video_id>/
 
 Evidence:
 
-- Pending.
+- [Step 2 progress](../reports/pipeline-step-2-progress.md)
+- [Metadata model fixture](../reports/metadata-model-fixture-2026-09-10.md)
+- [n8n metadata integration](../reports/n8n-metadata-integration-step-2.md)
+- [Media manifest contract](../reports/media-manifest-contract-step-2.md)
 
 Done when: a three-chunk source creates valid selected metadata, clean masters,
 and mock-branded landscape/vertical variants without ambiguous filenames or
@@ -159,7 +172,8 @@ unrecoverable stage failure.
 
 Goal: prevent missing or corrupt media from entering review and publishing.
 
-- [ ] Define and version the media manifest JSON schema.
+- [x] Define and version the media manifest JSON schema. Evidence: committed
+  `media-manifest.v1` schema and 12 Docker contract tests.
 - [ ] Run `ffprobe` on every required asset before render completion.
 - [ ] Verify that each file exists and can be opened.
 - [ ] Verify expected width, height, codec, duration, audio stream, video stream,

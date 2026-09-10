@@ -27,28 +27,54 @@ The JSON files are backups and deployment artifacts. n8n does not load or
 synchronize them automatically. A file only enters the database when it is
 explicitly imported.
 
-## Current canonical baseline
+## Current canonical candidate
 
 The live database workflow was exported and round-trip verified on September 9,
-2026. The result is `automation/workflows/reup-pipeline.json`.
+2026. On September 10, the canonical JSON was extended with the reviewed
+metadata gate. It has not been imported into the live database.
 
 | Version | Nodes | Last update |
 | --- | ---: | --- |
-| Canonical `reup-pipeline.json` | 30 | September 9, 2026 |
+| Live database `video editing` | 30 | September 10, 2026 export |
+| Canonical `reup-pipeline.json` | 36 | September 10, 2026 candidate |
 | `f7-render.json` | 24 | September 7, 2026 |
-| Difference | 6 additional canonical nodes | F7 is historical |
+| Live-to-canonical difference | 6 metadata nodes | Import pending |
 
-The six database-only nodes are:
+The live export also differs from canonical input handling: live still sends
+`videoUrl` as the invalid-input Telegram `chatId`, while canonical keeps the
+corrected source `chatId` and Vietnamese guidance. Do not overwrite that fix
+with the older live value.
 
-- `Code in JavaScript`
-- `If`
-- Four Telegram message nodes
+The six canonical metadata nodes are:
+
+- `Start metadata`
+- `Wait for metadata`
+- `Metadata valid?`
+- `Metadata selected`
+- `Metadata failed`
+- `Metadata needs action`
 
 Do not import `f7-render.json` over the current workflow. It is an older phase
 snapshot. Use `reup-pipeline.json` as the reviewed import target.
 
 All workflows were inactive at the time of inspection. An inactive workflow
 can be edited and tested manually, but its production webhook is not active.
+
+## Prepared canonical flow
+
+```mermaid
+flowchart LR
+    C[Chunked] --> S[Start metadata]
+    S --> W[Wait for metadata]
+    W --> V{Job done and revision selected?}
+    V -->|Yes| M[Metadata selected]
+    M --> VO[Start voice]
+    V -->|No| F[Metadata failed]
+    F --> T[Telegram needs action]
+```
+
+The canonical JSON passed seven structural contract tests and imported into an
+isolated n8n database. This validation did not touch the live `n8n_data` volume.
 
 ## Current live workflow
 
