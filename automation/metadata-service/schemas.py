@@ -1,6 +1,7 @@
 """Versioned structured-output contracts for generated social metadata."""
 
 import re
+import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -15,10 +16,51 @@ _EMOJI = re.compile(
     "\U00002600-\U000027BF"
     "]"
 )
+_URL = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
+_VIETNAMESE_WORDS = {
+    "ban",
+    "cau",
+    "chuyen",
+    "co",
+    "cua",
+    "de",
+    "dieu",
+    "duoc",
+    "gi",
+    "khong",
+    "la",
+    "mot",
+    "nay",
+    "nhung",
+    "phan",
+    "sao",
+    "su",
+    "that",
+    "trong",
+    "va",
+    "voi",
+    "xem",
+}
 
 
 def _emoji_count(*values: str) -> int:
     return sum(len(_EMOJI.findall(value)) for value in values)
+
+
+def _has_vietnamese_signal(*values: str) -> bool:
+    text = " ".join(values).casefold()
+    normalized = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", text.replace("đ", "d"))
+        if not unicodedata.combining(character)
+    )
+    words = set(re.findall(r"[a-z]+", normalized))
+    return len(words & _VIETNAMESE_WORDS) >= 3
+
+
+def _reject_generated_urls(*values: str) -> None:
+    if any(_URL.search(value) for value in values):
+        raise ValueError("generated metadata must not invent or append URLs")
 
 
 class StrictModel(BaseModel):
@@ -79,6 +121,9 @@ class YouTubeMetadata(StrictModel):
         )
         if _emoji_count(*values) > 2:
             raise ValueError("YouTube metadata may contain at most two emojis")
+        if not _has_vietnamese_signal(self.summary, *values):
+            raise ValueError("YouTube metadata must contain Vietnamese text")
+        _reject_generated_urls(self.summary, *values)
         return self
 
 
@@ -95,4 +140,25 @@ class ChunkMetadata(StrictModel):
     def validate_visual_emoji_limit(self) -> "ChunkMetadata":
         if _emoji_count(self.hook, self.visual_caption) > 2:
             raise ValueError("chunk visual text may contain at most two emojis")
+        values = (
+            self.hook,
+            self.visual_caption,
+            self.facebook.caption,
+            self.tiktok.caption,
+        )
+        if not _has_vietnamese_signal(*values):
+            raise ValueError("chunk metadata must contain Vietnamese text")
+        _reject_generated_urls(*values)
         return self
+
+
+class MetadataJobRequest(StrictModel):
+    video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+    callback_url: str | None = None
+
+
+class MetadataJobAccepted(StrictModel):
+    job_id: str
+    video_id: str
+    state: Literal["queued", "running"]
+    reused: bool

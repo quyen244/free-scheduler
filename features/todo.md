@@ -24,15 +24,15 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 - [x] Generate whole-video YouTube metadata and per-chunk visual,
   Facebook, and TikTok metadata.
 - [x] Default metadata to Vietnamese with curiosity-driven, engaging,
-  never-misleading copy, at most two relevant emojis, and cost-first model
-  selection.
+  never-misleading copy and at most two relevant emojis. `gpt-5.6-luna` is the
+  explicit model choice and passed live access/structured-output fixtures.
 - [x] Group YouTube, Facebook, and TikTok accounts in brand profiles that own
   the watermark and signature music for both ratios.
 - [x] Allow failed-stage resume and intentional reprocessing without
   permanently blacklisting the source URL.
 - [ ] Confirm Shopee Affiliate Open API `app_id` and `secret_key` availability.
-- [ ] Record the fixture-selected OpenAI model and cost ceiling, and calibrate
-  exact signature-music ducking behavior.
+- [ ] Set and enforce the metadata cost ceiling, and calibrate exact
+  signature-music ducking behavior. The live `gpt-5.6-luna` fixture passed.
 
 ## P0 — prove assumptions and contracts
 

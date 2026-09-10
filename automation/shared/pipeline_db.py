@@ -25,7 +25,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DB_PATH = Path(os.environ.get("PIPELINE_DB", str(DATA_DIR / "pipeline.db")))
 SCHEMA_PATH = DATA_DIR / "schema.sql"
 
-JOB_KINDS = ("ingest", "transcribe", "translate", "voice", "render")
+JOB_KINDS = ("ingest", "transcribe", "translate", "voice", "render", "metadata")
 
 # A video only ever moves forward through these. See contracts.md.
 STAGE_ORDER = (
@@ -66,6 +66,7 @@ def init() -> None:
     _widen_job_kinds()
     _add_chunk_contract_columns()
     _add_source_validation_columns()
+    _add_metadata_contract_columns()
 
 
 def _add_chunk_contract_columns() -> None:
@@ -107,6 +108,22 @@ def _add_source_validation_columns() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_videos_source_hash ON videos (source_hash)"
         )
+
+
+def _add_metadata_contract_columns() -> None:
+    """Add metadata provenance fields to databases created by earlier slices."""
+    with connect() as conn:
+        table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'metadata_attempts'"
+        ).fetchone()
+        if table is None:
+            return
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(metadata_attempts)").fetchall()
+        }
+        if "response_model" not in columns:
+            conn.execute("ALTER TABLE metadata_attempts ADD COLUMN response_model TEXT")
 
 
 def _widen_job_kinds() -> None:
@@ -415,6 +432,50 @@ def create_job(video_id: str, kind: str, callback_url: str | None = None) -> str
             (job_id, video_id, kind, callback_url, _now()),
         )
     return job_id
+
+
+def create_or_reuse_active_job(
+    video_id: str, kind: str, callback_url: str | None = None
+) -> tuple[str, str, bool]:
+    """Create one active job per video/kind, atomically.
+
+    n8n may retry an HTTP request after losing a response. Reusing the queued or
+    running job prevents that transport retry from spending for the same
+    metadata twice. Completed and failed jobs are never reused.
+    """
+    if kind not in JOB_KINDS:
+        raise ValueError(f"unknown job kind {kind!r}")
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            active = conn.execute(
+                """
+                SELECT job_id, state
+                  FROM jobs
+                 WHERE video_id = ? AND kind = ?
+                   AND state IN ('queued', 'running')
+                 ORDER BY created_at, job_id
+                 LIMIT 1
+                """,
+                (video_id, kind),
+            ).fetchone()
+            if active is not None:
+                conn.execute("COMMIT")
+                return str(active["job_id"]), str(active["state"]), True
+
+            job_id = uuid.uuid4().hex
+            conn.execute(
+                """
+                INSERT INTO jobs (job_id, video_id, kind, state, callback_url, created_at)
+                     VALUES (?, ?, ?, 'queued', ?, ?)
+                """,
+                (job_id, video_id, kind, callback_url, _now()),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    return job_id, "queued", False
 
 
 def mark_running(job_id: str) -> None:

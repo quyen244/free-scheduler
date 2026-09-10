@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     video_id     TEXT NOT NULL,
     kind         TEXT NOT NULL
                  CHECK (kind IN ('ingest', 'transcribe', 'translate', 'voice',
-                                'render')),
+                                'render', 'metadata')),
     state        TEXT NOT NULL DEFAULT 'queued'
                  CHECK (state IN ('queued', 'running', 'done', 'failed')),
     progress     REAL NOT NULL DEFAULT 0,
@@ -81,6 +81,65 @@ CREATE INDEX IF NOT EXISTS idx_videos_stage   ON videos (stage);
 CREATE INDEX IF NOT EXISTS idx_chunks_ready   ON chunks (ready_to_upload, status);
 CREATE INDEX IF NOT EXISTS idx_jobs_state     ON jobs (state, kind);
 CREATE INDEX IF NOT EXISTS idx_jobs_video     ON jobs (video_id);
+
+-- One deterministic metadata revision per transcript/prompt/model combination.
+-- Items are selected independently so a bad chunk does not regenerate the
+-- successful YouTube result or its sibling chunks.
+CREATE TABLE IF NOT EXISTS metadata_revisions (
+    revision_id      TEXT PRIMARY KEY,
+    video_id         TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+    revision_number  INTEGER NOT NULL,
+    generation_key   TEXT NOT NULL UNIQUE,
+    transcript_hash  TEXT NOT NULL,
+    prompt_version   TEXT NOT NULL,
+    schema_version   TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    state             TEXT NOT NULL DEFAULT 'pending'
+                      CHECK (state IN ('pending', 'generating', 'selected',
+                                       'needs_action', 'stale')),
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (video_id, revision_number)
+);
+
+CREATE TABLE IF NOT EXISTS metadata_items (
+    revision_id   TEXT NOT NULL REFERENCES metadata_revisions(revision_id) ON DELETE CASCADE,
+    item_key      TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('youtube', 'chunk')),
+    chunk_idx     INTEGER,
+    state         TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (state IN ('pending', 'generating', 'selected', 'needs_action')),
+    selected_json TEXT,
+    response_id   TEXT,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (revision_id, item_key)
+);
+
+CREATE TABLE IF NOT EXISTS metadata_attempts (
+    attempt_id     TEXT PRIMARY KEY,
+    revision_id    TEXT NOT NULL,
+    item_key       TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    state          TEXT NOT NULL CHECK (state IN ('running', 'selected', 'failed')),
+    model          TEXT NOT NULL,
+    response_model TEXT,
+    response_id    TEXT,
+    input_tokens   INTEGER,
+    output_tokens  INTEGER,
+    total_tokens   INTEGER,
+    error_code     TEXT,
+    error           TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at     TEXT,
+    UNIQUE (revision_id, item_key, attempt_number),
+    FOREIGN KEY (revision_id, item_key)
+        REFERENCES metadata_items(revision_id, item_key) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_metadata_revision_video
+    ON metadata_revisions (video_id, revision_number);
+CREATE INDEX IF NOT EXISTS idx_metadata_item_state
+    ON metadata_items (revision_id, state);
 
 -- Videos whose raw.mp4 can be reclaimed: rendered, older than 7 days, not
 -- already evicted. This is the retention sweep's whole query.

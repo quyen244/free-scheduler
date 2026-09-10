@@ -101,6 +101,27 @@ def test_unknown_fields_are_rejected():
         YouTubeMetadata.model_validate(payload)
 
 
+def test_english_content_cannot_claim_to_be_vietnamese():
+    payload = youtube_payload()
+    payload.update(
+        {
+            "summary": "A source video about a plant growing toward a window.",
+            "title": "Why the plant leans toward the window",
+            "description": "A factual description of the source material.",
+            "thumbnail_text": "What happened?",
+        }
+    )
+    with pytest.raises(ValidationError):
+        YouTubeMetadata.model_validate(payload)
+
+
+def test_generated_urls_are_rejected_for_platform_metadata():
+    payload = chunk_payload()
+    payload["facebook"]["caption"] += " https://untrusted.example"
+    with pytest.raises(ValidationError):
+        ChunkMetadata.model_validate(payload)
+
+
 def test_json_schema_is_strict_and_versioned():
     schema = ChunkMetadata.model_json_schema()
     assert schema["additionalProperties"] is False

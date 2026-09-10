@@ -35,14 +35,35 @@ Implemented:
 - Strict normalization for YouTube `watch`, `youtu.be`, `shorts`, `embed`, and
   `live` URLs, including rejection of malformed and lookalike hosts.
 - A healthy Docker metadata-service with strict versioned schemas for YouTube
-  and per-chunk visual/Facebook/TikTok copy. It does not call OpenAI yet.
+  and per-chunk visual/Facebook/TikTok copy.
+- Durable metadata revisions, independent YouTube/chunk result selection,
+  deterministic transcript/prompt/schema/model keys, bounded selective retry,
+  restart recovery, and response/token provenance.
+- Duplicate active metadata submissions reuse one job. New transcript/model/
+  prompt revisions mark the prior metadata stale and invalidate old chunk
+  renders. Selected visual hook/caption fields are handed to the renderer;
+  Facebook and TikTok copy stays separately versioned.
+- Metadata prompt version `metadata.vi.v2` treats transcripts as untrusted data
+  rather than instructions. Deterministic validation rejects non-Vietnamese
+  output signals, generated URLs, malformed JSON, wrong chunk identities,
+  invalid hashtag groups, excess emojis, and unknown fields.
+- The selected model is `gpt-5.6-luna`; it is configured only in the metadata
+  service. The API key remains in the server-only root `.env` source.
+- The updated API project exposes `gpt-5.6-luna`. A live one-result fixture and
+  a read-only whole-video plus three-chunk fixture passed. The representative
+  run used 10,048 input and 1,412 output tokens (`$0.003704` estimated) with
+  `reasoning.effort: none`.
 
 ## Verification
 
 - Media-service source validation and URL normalization: `21 passed` inside
   Docker.
 - Whisper balanced chunk unit subset: `12 passed` inside Docker.
-- Metadata structured-output schemas: `10 passed` inside Docker.
+- Metadata service schemas, Responses request contract, revision persistence,
+  selective retry, cached reuse, transcript-change invalidation, and restart
+  recovery, duplicate-job reuse, safe renderer handoff, and 1/3/4-chunk
+  fixtures and typed API failures: `35 passed` inside Docker. Shared callback
+  regression tests: `2 passed`.
 - Reference results: 5:00 -> 1, 9:00 -> 1, 10:00 -> 2,
   13:42 -> 3, 20:00 -> 4.
 - Installed SQLite database was migrated in place; existing `n8n_data` was not
@@ -63,10 +84,11 @@ No rights marker or additional data field is required.
 
 ## Remaining Step 2 work
 
-- Durable duplicate-active, resume-existing, and force-new-campaign actions.
-- OpenAI Responses API generation, provenance/selective retry, and n8n metadata
-  job/wait/validation nodes.
-- Cost fixture and final model/budget record.
+- Durable resume-existing and force-new-campaign actions outside the metadata
+  stage. Duplicate active metadata job reuse is implemented and tested.
+- n8n metadata job/wait/validation nodes.
+- Final metadata cost ceiling and enforcement. The representative three-chunk
+  cost fixture is recorded.
 - Clean 1920x1080 whole render and clean 1080x1920 chunk renders.
 - Mock-brand watermark/signature-music variants.
 - Versioned manifest with `ffprobe`, streams, hashes, warnings, and completion gate.

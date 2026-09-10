@@ -50,9 +50,11 @@ Last updated: 2026-09-10
 - An OpenAI API key is available under the server-only environment variable
   `OPENAI_API_KEY`. Never store its value in Git, workflow JSON, browser code,
   logs, or the database.
-- Select the OpenAI model with a cost-first fixture evaluation. The selected
-  model must still pass the structured-output, Vietnamese-writing, grounding,
-  and retry acceptance tests; record its exact name and cost before production.
+- Use `gpt-5.6-luna` for metadata generation. The user explicitly selected it
+  on 2026-09-10. It must still pass the structured-output, Vietnamese-writing,
+  grounding, and retry acceptance fixtures before production use. Access and
+  structured generation were verified with the updated API project on
+  2026-09-10. Use `reasoning.effort: none` for this focused generation task.
 
 ## Brands, approval, and publishing
 
@@ -101,8 +103,7 @@ Last updated: 2026-09-10
 
 ## Pending decisions
 
-- Exact OpenAI model and per-campaign cost ceiling after the cost-first fixture
-  evaluation.
+- Per-campaign metadata cost ceiling after measuring representative fixtures.
 - Exact signature-music loudness/ducking calibration and behavior when a
   configured audio file is missing.
 - Whether Shopee Affiliate Open API credentials are available.
