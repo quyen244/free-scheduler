@@ -24,8 +24,8 @@ from shared import pipeline_db
 # uvicorn, in this same container. See the module docstring.
 SERVICE = "http://127.0.0.1:8001"
 
-TEST_VIDEO_URL = "https://www.youtube.com/watch?v=3gi_15UH9fQ"
-TEST_VIDEO_ID = "3gi_15UH9fQ"
+TEST_VIDEO_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+TEST_VIDEO_ID = "jNQXAC9IVRw"
 
 # Shaped like a YouTube id, owned by no video. Passes URL validation and fails
 # inside yt-dlp — the failure that strands a workflow if nothing calls back.
@@ -75,7 +75,7 @@ def _await_callback(recorder: _Recorder, timeout: float) -> dict:
     raise AssertionError(f"no callback arrived within {timeout}s")
 
 
-def test_ingest_job_answers_at_once_and_calls_back_when_the_work_is_done():
+def test_policy_rejected_ingest_answers_at_once_and_calls_back_with_failure():
     shutil.rmtree(media.video_dir(TEST_VIDEO_ID), ignore_errors=True)
 
     with callback_recorder() as recorder:
@@ -84,7 +84,6 @@ def test_ingest_job_answers_at_once_and_calls_back_when_the_work_is_done():
             f"{SERVICE}/media/jobs",
             json={
                 "url": TEST_VIDEO_URL,
-                "rights_status": "owned",
                 "callback_url": _resume_url(recorder),
             },
             timeout=30.0,
@@ -104,20 +103,19 @@ def test_ingest_job_answers_at_once_and_calls_back_when_the_work_is_done():
         payload = _await_callback(recorder, timeout=180.0)
 
     assert payload["job_id"] == accepted["job_id"]
-    assert payload["state"] == "done"
+    assert payload["state"] == "failed"
     assert payload["video_id"] == TEST_VIDEO_ID
-    assert payload["result"]["raw_path"].endswith("raw.mp4")
-    assert payload["result"]["title"] != TEST_VIDEO_ID
+    assert "SourcePolicyError" in payload["error"]
 
     # Pollable as well as pushed, so a dropped callback costs a query rather
     # than a re-download.
     status = httpx.get(f"{SERVICE}/jobs/{accepted['job_id']}", timeout=10.0)
     assert status.status_code == 200
-    assert status.json()["state"] == "done"
+    assert status.json()["state"] == "failed"
 
     stored = pipeline_db.get_job(accepted["job_id"])
     assert stored is not None
-    assert stored["state"] == "done"
+    assert stored["state"] == "failed"
     assert stored["finished_at"] is not None
 
 
@@ -133,7 +131,6 @@ def test_a_failed_ingest_calls_back_too_instead_of_parking_the_workflow():
             f"{SERVICE}/media/jobs",
             json={
                 "url": DEAD_VIDEO_URL,
-                "rights_status": "owned",
                 "callback_url": _resume_url(recorder),
             },
             timeout=30.0,

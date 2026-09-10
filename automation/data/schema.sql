@@ -17,8 +17,6 @@ CREATE TABLE IF NOT EXISTS videos (
     width       INTEGER,
     height      INTEGER,
     source_hash TEXT,
-    rights_status TEXT NOT NULL DEFAULT 'unknown',
-    rights_evidence TEXT,
     validation_status TEXT NOT NULL DEFAULT 'pending',
     validation_error_code TEXT,
     source_lang TEXT,

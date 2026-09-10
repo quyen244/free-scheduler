@@ -843,7 +843,7 @@
         <div class="bezel">
           <div class="core canvas-core">
             <div class="state-lane">
-              <div class="state-card"><strong>submitted</strong><p>URL and rights arrive.</p></div>
+              <div class="state-card"><strong>submitted</strong><p>YouTube URL arrives.</p></div>
               <div class="state-card"><strong>validating</strong><p>Identity, media, duration, resolution.</p></div>
               <div class="state-card"><strong>processing</strong><p>Transcript, metadata, voice, renders.</p></div>
               <div class="state-card"><strong>ready_for_review</strong><p>Complete manifest and revision.</p></div>
@@ -904,7 +904,7 @@
               <tbody>
                 <tr><td>Transient</td><td>Timeout, 429, provider 5xx</td><td>Up to three backoff retries.</td><td>Show attempt count; alert only after exhaustion.</td></tr>
                 <tr><td>Invalid input</td><td>Corrupt, below 720p, outside 5–20 min</td><td>Stop before expensive processing.</td><td>Explain the rule and allow replacement.</td></tr>
-                <tr><td>Missing configuration</td><td>Rights, music, expired credential</td><td>No blind retry.</td><td>Open the exact setting or reconnect action.</td></tr>
+                <tr><td>Missing configuration</td><td>Music or expired credential</td><td>No blind retry.</td><td>Open the exact setting or reconnect action.</td></tr>
                 <tr><td>Invalid output</td><td>Wrong ratio, missing audio, corrupt render</td><td>Retry affected render once, then pause.</td><td>Retry failed stage; preserve transcript and metadata.</td></tr>
                 <tr><td>Stale revision</td><td>Edit after approval</td><td>Invalidate old approval.</td><td>Prepare and approve the new revision.</td></tr>
                 <tr><td>Partial publish</td><td>One TikTok target fails after YouTube succeeds</td><td>Keep successes and retry only failure.</td><td>Show the exact target and safe retry action.</td></tr>
@@ -923,7 +923,7 @@
       "use strict";
 
       var stages = [
-        { id: "validate", name: "Validate source", vi: "Kiểm tra đầu vào", owner: "Media service + domain rules", plain: "Checks URL identity, rights, duration, resolution, readability, and active duplicates." },
+        { id: "validate", name: "Validate source", vi: "Kiểm tra đầu vào", owner: "Media service + domain rules", plain: "Checks URL identity, duration, resolution, readability, and active duplicates." },
         { id: "ingest", name: "Ingest", vi: "Tải video YouTube", owner: "Media service", plain: "Downloads the YouTube source and records its stable content hash." },
         { id: "transcript", name: "Transcript", vi: "Chép lời và dịch", owner: "Whisper + translation services", plain: "Creates timed speech segments and a Vietnamese translation when needed." },
         { id: "chunk", name: "Chunk", vi: "Chia part 4–5 phút", owner: "Transcript service", plain: "Builds variable, non-overlapping chunks and moves boundaries to safe sentence endings." },
@@ -948,7 +948,7 @@
 
       function commonPrefix() {
         return [
-          e("validate", "completed", "Source accepted", "YouTube URL normalized; 13:42, 1080p, rights owned, no active duplicate.", { SourceVideo: { youtubeId: "dQw4-demo-01", sha256: "84f1…9bc2" }, Campaign: { state: "processing" } }),
+          e("validate", "completed", "Source accepted", "YouTube URL normalized; 13:42, 1080p, no active duplicate.", { SourceVideo: { youtubeId: "dQw4-demo-01", sha256: "84f1…9bc2" }, Campaign: { state: "processing" } }),
           e("ingest", "completed", "Source stored", "raw.mp4 is available in local media storage.", { SourceArtifact: { kind: "RAW_SOURCE", bytes: 188420144, retainedUntil: "+7d after completion" } }),
           e("transcript", "completed", "Transcript ready", "823 timed segments translated to Vietnamese.", { ProcessingAttempt: { kind: "transcribe_translate", attempt: 1, state: "done" } }),
           e("chunk", "completed", "Three parts created", "part_1 4:34, part_2 4:31, part_3 4:37; no overlap or cut sentence.", { ContentItem: ["WHOLE_VIDEO", "part_1", "part_2", "part_3"] }),

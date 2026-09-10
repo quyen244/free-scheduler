@@ -65,9 +65,9 @@ canonical JSON without losing nodes, connections, or credential references.
 
 Goal: turn the product idea into assertions that later stages must satisfy.
 
-- [x] Complete [Foundation and rights](foundation_and_rights/todo.md).
+- [x] Complete the [Foundation contract](foundation_and_rights/todo.md).
 - [x] Complete the executable [Pipeline acceptance contract](pipeline_acceptance_contract/todo.md).
-- [x] Document YouTube URL input, validation, rights, and reusable source identity.
+- [x] Document URL-only YouTube input, validation, and reusable source identity.
 - [x] Defer local-file input until after the URL pipeline is reliable.
 - [x] Document variable, unique, sentence-safe 4-5 minute chunks.
 - [x] Document whole-video and per-chunk metadata outputs and edit invalidation.
@@ -86,7 +86,6 @@ Goal: turn the product idea into assertions that later stages must satisfy.
 - [x] Assert that no upload target can run before approval.
 - [x] Assert that one approval covers the complete campaign revision.
 - [x] Assert that an edit after approval invalidates the approval.
-- [x] Assert that unknown rights block review and approval.
 - [x] Assert that TikTok success means `draft delivered`, not `publicly posted`.
 
 Evidence:
@@ -106,11 +105,20 @@ without calling an external platform.
 Goal: make the local production path correct from input validation through
 metadata, branded rendering, and media output.
 
+Status: in progress. Source preflight and balanced chunk planning are verified;
+metadata and two-ratio render/manifest work remain.
+
 - [ ] Complete [Source ingest and validation](source_ingest_validation/todo.md).
 - [ ] Complete [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md).
 - [ ] Complete the mock-profile work in [Brand profiles](brand_profiles/todo.md).
 - [ ] Complete [Media variants and manifest](media_variants_manifest/todo.md).
 - [ ] Insert metadata generation after `Chunked` and before voice/render.
+- [x] Define and Docker-test strict `metadata.v1` schemas for one YouTube result
+  and each chunk's visual, Facebook, and TikTok metadata.
+- [x] Replace greedy four-minute chunking with the accepted balanced policy.
+- [x] Persist stable `part_<n>` names and transcript-boundary shift evidence.
+- [x] Add typed source validation with duration, readability,
+  resolution, `ffprobe`, and SHA-256 checks before transcription.
 - [ ] Produce `outputs/youtube/whole-16x9.mp4` as a real landscape render.
 - [ ] Never use a concatenation of vertical chunks as the YouTube asset.
 - [ ] Produce `N` clean vertical chunk masters.

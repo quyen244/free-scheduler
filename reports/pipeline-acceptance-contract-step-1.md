@@ -20,7 +20,7 @@ contract; it defines the target that Steps 2 and 3 must implement.
 | 20:00 | 4 | upper accepted duration |
 
 The contract also contains negative cases for 4:59, 20:01, below 720p,
-corrupt media, unknown rights, zero chunks, missing assets, wrong target mapping,
+corrupt media, zero chunks, missing assets, wrong target mapping,
 pre-approval execution, stale approval, approval replay, and invalid TikTok
 publication semantics.
 

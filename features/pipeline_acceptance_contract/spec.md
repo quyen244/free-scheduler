@@ -19,7 +19,7 @@ remain responsible for persistence, retries, rendering, and provider calls.
 
 ```mermaid
 flowchart LR
-    F[Reference source fixture] --> V[Validate source and rights]
+    F[Reference source fixture] --> V[Validate source]
     V --> C[Build expected chunks]
     C --> M[Validate metadata shape]
     C --> A[Validate branded assets]
@@ -91,7 +91,7 @@ same vertical asset only when it belongs to the same brand.
 | Case | Required behavior | Recovery |
 |---|---|---|
 | Duration below 5:00 or above 20:00 | block before processing | replace source |
-| Corrupt, below 720p, or unknown rights | block review and approval | correct source/rights and resume |
+| Corrupt or below 720p | block review and approval | correct/replace source and resume |
 | Zero chunks or missing asset | block review | retry the failed production stage |
 | Wrong asset ratio/platform mapping | reject target plan | rebuild the plan |
 | Approval replay | do not duplicate targets or audit action | none required |

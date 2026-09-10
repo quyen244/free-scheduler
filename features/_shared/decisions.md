@@ -1,21 +1,21 @@
 # Confirmed product decisions
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
-## Source and rights
+## Source input
 
 - Accept a YouTube URL for the MVP. Local-file upload/import is explicitly
   deferred and must not block the pipeline-correctness milestone.
+- Telegram/webhook submission contains only the YouTube URL. Do not require a
+  rights marker, rights status, or rights evidence field.
 - Reject corrupt media, media shorter than 5 minutes or longer than 20 minutes,
-  media below 720p, and submissions whose rights status is `unknown`.
+  and media below 720p.
 - Normal source duration is 10-20 minutes.
 - Identify a YouTube source by normalized YouTube video ID and downloaded SHA-256.
   A future local-import feature would use SHA-256 without changing campaign identity.
 - Duplicate protection prevents an accidental second active campaign; it does
   not permanently blacklist a source. Failed work can resume, and an operator
   can intentionally create a new campaign for an old source.
-- Allowed rights states are `owned`, `licensed`, `permission`, and
-  `public_domain`. Store an optional evidence note or URL.
 
 ## Content and metadata
 

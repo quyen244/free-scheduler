@@ -149,7 +149,7 @@ Use these concepts in PostgreSQL. Names may change; the separation should not.
 
 | Concept | Meaning | Important fields |
 |---|---|---|
-| `SourceVideo` | One ingested source and its production run | n8n video ID, title, rights status, render revision |
+| `SourceVideo` | One ingested source and its production run | n8n video ID, title, source URL, render revision |
 | `ContentItem` | One derived delivery unit | source video ID, `WHOLE_VIDEO | CHUNK`, nullable chunk index, duration |
 | `AssetVariant` | A file made for a delivery format | kind, ratio, width, height, duration, path, checksum, ready state |
 | `Campaign` | One approved distribution decision for a source video | source video, schedule, approval state, selected product |
@@ -480,9 +480,9 @@ roughly half a day to two focused days. Estimates are directional, not promises.
 
 ### P0 — Decisions and feasibility gates
 
-- [ ] **P0.1 Rights gate:** add `rights_status` and require
-  `owned | licensed | public_domain | permission` before approval.
-  - Accept: an unknown-rights item cannot reach `approved`.
+- [x] **P0.1 URL-only input:** accept one YouTube URL from the webhook without
+  requiring additional metadata.
+  - Accept: the ingest endpoint creates a job from `{ "url": "..." }`.
 - [x] **P0.2 Confirm upload unit:** YouTube publishes one whole 16:9 video;
   Facebook and TikTok publish each 9:16 chunk as a separate post.
   - Accept: for N chunks and one account/platform, the campaign contains
@@ -573,7 +573,7 @@ roughly half a day to two focused days. Estimates are directional, not promises.
 4. n8n calls the app's signed render-complete webhook. The app idempotently
    upserts content/assets, generates platform drafts, and inserts an outbox event.
 5. The outbox dispatcher sends Telegram a compact preview and one-use buttons.
-6. Approval atomically verifies chat, token, expiry, rights status, and revision,
+6. Approval atomically verifies chat, token, expiry, preflight, and revision,
    then fans out targets by the fixed mapping: one whole-video target per
    selected YouTube account and one target per chunk for every selected Facebook
    and TikTok account.

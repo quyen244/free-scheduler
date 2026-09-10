@@ -712,7 +712,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const message = $input.first().json.body.message || {};\nconst chatId = message.chat?.id;\nconst text = message.text || '';\n\nconst urlRegex = /(https?:\\/\\/[^\\s]+)/g;\nconst urls = text.match(urlRegex);\n\nreturn {\n  chatId: chatId,\n  text: text,\n  urls: urls || [],\n  videoUrl: urls ? urls[0] : null  \n};"
+          "jsCode": "const message = $input.first().json.body.message || {};\nconst chatId = message.chat?.id;\nconst text = message.text || '';\n\nconst urlRegex = /(https?:\\/\\/[^\\s]+)/g;\nconst urls = text.match(urlRegex);\n\nreturn {\n  chatId,\n  text,\n  urls: urls || [],\n  videoUrl: urls ? urls[0] : null\n};"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -759,8 +759,8 @@
       },
       {
         "parameters": {
-          "chatId": "={{ $('Code in JavaScript').item.json.videoUrl }}",
-          "text": "Please , attach url !",
+          "chatId": "={{ $('Code in JavaScript').item.json.chatId }}",
+          "text": "Gửi một URL YouTube hợp lệ. Ví dụ: https://youtube.com/watch?v=...",
           "additionalFields": {}
         },
         "type": "n8n-nodes-base.telegram",

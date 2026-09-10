@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 
 import jobs
 import media
-import validation
 from errors import AudioExtractionError, DownloadError, InvalidURLError, SourcePolicyError
 from schema import DownloadRequest, JobAccepted, JobRequest, MediaResponse
 from shared import pipeline_db
@@ -65,15 +64,12 @@ def create_ingest_job(request: JobRequest, background: BackgroundTasks) -> JobAc
     # mistake, and it deserves a 400 now instead of a failed job to go and read
     # about later.
     video_id = media.extract_video_id(request.url)
-    validation.validate_rights(request.rights_status)
 
     job_id = pipeline_db.create_job(video_id, "ingest", request.callback_url)
     background.add_task(
         jobs.run_ingest,
         job_id,
         request.url,
-        request.rights_status,
-        request.rights_evidence,
     )
     return JobAccepted(job_id=job_id, video_id=video_id, state="queued")
 
@@ -88,9 +84,7 @@ def read_job(job_id: str) -> JSONResponse:
 
 @app.post("/download", response_model=MediaResponse)
 def download(request: DownloadRequest) -> MediaResponse:
-    record, cached = media.get_or_download(
-        request.url, request.rights_status, request.rights_evidence
-    )
+    record, cached = media.get_or_download(request.url)
     directory = media.video_dir(str(record["video_id"]))
 
     return MediaResponse(
@@ -103,5 +97,4 @@ def download(request: DownloadRequest) -> MediaResponse:
         width=int(record["width"]),
         height=int(record["height"]),
         source_hash=str(record["source_hash"]),
-        rights_status=str(record["rights_status"]),
     )

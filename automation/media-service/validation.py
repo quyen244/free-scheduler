@@ -12,7 +12,6 @@ from errors import SourcePolicyError
 MIN_DURATION_S = 300.0
 MAX_DURATION_S = 1200.0
 MIN_HEIGHT = 720
-ALLOWED_RIGHTS = {"owned", "licensed", "permission", "public_domain"}
 
 
 @dataclass(frozen=True)
@@ -20,14 +19,6 @@ class MediaProbe:
     duration_s: float
     width: int
     height: int
-
-
-def validate_rights(rights_status: str) -> None:
-    if rights_status not in ALLOWED_RIGHTS:
-        raise SourcePolicyError(
-            "rights_unknown",
-            "Declare rights as owned, licensed, permission, or public_domain.",
-        )
 
 
 def validate_probe(probe: MediaProbe) -> None:

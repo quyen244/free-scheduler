@@ -12,7 +12,7 @@ the exact reviewed revision.
 
 An outbox dispatcher sends a summary with Approve, Reject, and Open buttons. The
 button contains only an opaque, short-lived ID. The callback verifies the chat,
-operator, expiry, one-use state, rights, preflight, and revision before creating
+operator, expiry, one-use state, preflight, and revision before creating
 all publish targets in one transaction.
 
 ```mermaid
@@ -37,4 +37,3 @@ flowchart LR
 
 One approval creates the exact expected targets once; duplicate, expired,
 wrong-chat, and stale-revision callbacks create none and produce audit events.
-

@@ -76,6 +76,32 @@ services:
       start_period: 20s
     networks: [reup]
 
+  # Owns OpenAI prompts, structured metadata validation, and selective retry.
+  # Only this container receives OPENAI_API_KEY from the git-ignored root .env.
+  metadata-service:
+    build: ./metadata-service
+    container_name: metadata-service
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8004:8004"
+    volumes:
+      - ./metadata-service:/app
+      - ./shared:/app/shared
+      - *data
+    env_file:
+      - ../.env
+    environment:
+      DATA_DIR: /data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8004/health',timeout=3).status==200 else 1)"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks: [reup]
+
   # Vietnamese, from whatever Whisper detected. CPU only: the GPU is Whisper's,
   # and this stage runs once per video.
   translate-service:

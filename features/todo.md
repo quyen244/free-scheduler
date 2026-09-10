@@ -16,8 +16,8 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 - [x] TikTok receives one 9:16 draft per chunk for the MVP.
 - [x] One Telegram approval authorizes the whole selected campaign fan-out.
 - [x] Facebook destinations are administered Pages.
-- [x] Accept YouTube URLs for the MVP; require readable 5-20 minute,
-  at-least-720p media with known rights.
+- [x] Accept a URL-only YouTube submission for the MVP; require readable
+  5-20 minute, at-least-720p media.
 - [x] Defer local-file upload/import until URL ingestion is reliable.
 - [x] Produce variable, unique, sentence-safe 4-5 minute chunks named
   `part_1`, `part_2`, and so on.
@@ -39,7 +39,7 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 - [ ] [Pipeline delivery roadmap - complete Steps 0-3](pipeline-delivery-roadmap.md)
 - [x] [Pipeline acceptance contract](pipeline_acceptance_contract/todo.md) — 12
   provider-free tests passed; [evidence](../reports/pipeline-acceptance-contract-step-1.md).
-- [x] [Foundation and rights](foundation_and_rights/todo.md)
+- [x] [Foundation contract](foundation_and_rights/todo.md)
 - [ ] [Source ingest and validation](source_ingest_validation/todo.md)
 - [ ] [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md)
 - [ ] [Brand profiles and branded variants](brand_profiles/todo.md)

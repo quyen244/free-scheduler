@@ -2,7 +2,7 @@
 
 Status: proposed
 Priority: P0
-Depends on: foundation and rights
+Depends on: foundation contract
 Consumed by: transcription, chunking, campaign review
 
 ## Outcome
@@ -10,6 +10,13 @@ Consumed by: transcription, chunking, campaign review
 Accept a YouTube URL exactly once, establish a stable source identity, and stop
 invalid media before expensive transcription or rendering. Local-file import is
 deferred until URL ingestion is reliable.
+
+Telegram submissions contain only the YouTube URL. The webhook extracts the
+first URL and does not require any rights marker or additional input field.
+Supported URL shapes are `youtube.com/watch?v=...`, `youtu.be/...`,
+`youtube.com/shorts/...`, `youtube.com/embed/...`, and `youtube.com/live/...`.
+All normalize to the exact 11-character YouTube video ID; lookalike hosts are
+rejected.
 
 ## Processing flow
 
@@ -21,7 +28,7 @@ flowchart TD
     D -->|Failed/published| R[Offer resume or new campaign]
     D -->|New| G[Download YouTube source]
     G --> P[ffprobe + SHA-256]
-    P --> V{Valid media, 5-20 min,<br/>at least 720p, rights known?}
+    P --> V{Valid media, 5-20 min,<br/>at least 720p?}
     V -->|No| B[needs_action with reason]
     V -->|Yes| T[Ready for transcription]
 ```
@@ -63,7 +70,7 @@ source permanently unusable.
 | Previous campaign published | Warn about intentional duplicate publishing | Explicitly create a new campaign |
 | URL changes but bytes match | Detect downloaded SHA-256 match | Choose existing source or intentional new campaign |
 | Source was deleted remotely | Preserve history and mark download failure | Replace URL or stop |
-| Corrupt, out-of-range, low-resolution, or unknown-rights input | Stop before transcription | Correct the input/rights and resume validation |
+| Corrupt, out-of-range, or low-resolution input | Stop before transcription | Replace/correct the source and resume validation |
 
 ## Done when
 

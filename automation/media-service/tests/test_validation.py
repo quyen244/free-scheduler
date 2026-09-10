@@ -1,9 +1,44 @@
 import hashlib
 
 import pytest
+from fastapi.testclient import TestClient
 
 import validation
-from errors import SourcePolicyError
+from errors import InvalidURLError, SourcePolicyError
+from main import app
+from media import extract_video_id
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+        "https://youtube.com/watch?feature=share&v=aaaaaaaaaaa",
+        "https://m.youtube.com/watch?v=aaaaaaaaaaa&t=12",
+        "https://youtu.be/aaaaaaaaaaa?si=share",
+        "https://www.youtube.com/shorts/aaaaaaaaaaa",
+        "https://youtube.com/embed/aaaaaaaaaaa",
+        "https://youtube.com/live/aaaaaaaaaaa?feature=share",
+    ],
+)
+def test_supported_youtube_urls_normalize_to_one_video_id(url):
+    assert extract_video_id(url) == "aaaaaaaaaaa"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://notyoutube.com/watch?v=aaaaaaaaaaa",
+        "https://youtube.com.evil.example/watch?v=aaaaaaaaaaa",
+        "https://youtube.com/watch?v=too-short",
+        "https://youtube.com/watch",
+        "ftp://youtube.com/watch?v=aaaaaaaaaaa",
+        "not a url",
+    ],
+)
+def test_malformed_or_lookalike_youtube_urls_are_rejected(url):
+    with pytest.raises(InvalidURLError):
+        extract_video_id(url)
 
 
 @pytest.mark.parametrize("duration_s", [300.0, 1200.0])
@@ -30,17 +65,16 @@ def test_below_720p_has_a_typed_failure():
     assert caught.value.code == "resolution_too_low"
 
 
-@pytest.mark.parametrize(
-    "rights_status", ["owned", "licensed", "permission", "public_domain"]
-)
-def test_known_rights_are_accepted(rights_status):
-    validation.validate_rights(rights_status)
+def test_job_endpoint_accepts_url_only(monkeypatch):
+    monkeypatch.setattr("main.jobs.run_ingest", lambda *_args: None)
+    with TestClient(app) as client:
+        response = client.post(
+            "/media/jobs",
+            json={"url": "https://www.youtube.com/watch?v=aaaaaaaaaaa"},
+        )
 
-
-def test_unknown_rights_are_rejected_before_download():
-    with pytest.raises(SourcePolicyError) as caught:
-        validation.validate_rights("unknown")
-    assert caught.value.code == "rights_unknown"
+    assert response.status_code == 202
+    assert response.json()["video_id"] == "aaaaaaaaaaa"
 
 
 def test_sha256_is_stable(tmp_path):

@@ -18,14 +18,18 @@
 
 ## Data and service work
 
-- [ ] Define versioned Structured Output schemas for YouTube and chunk metadata.
+- [x] Define versioned Structured Output schemas for YouTube and chunk metadata.
+  Evidence: `metadata-service/tests/test_schemas.py`.
 - [ ] Add explicit visual/platform metadata revisions and generation attempts.
 - [ ] Add transcript hash, prompt version, model, response ID, usage, and idempotency key.
 - [ ] Add a Docker metadata service using the OpenAI Responses API.
-- [ ] Pass `OPENAI_API_KEY` only to the metadata-service container through a
-  git-ignored Compose environment source.
-- [ ] Validate schema, length, prohibited empty fields, chunk identity, source
-  grounding, Vietnamese output, and the two-emoji maximum.
+- [x] Pass `OPENAI_API_KEY` only to the metadata-service container through a
+  git-ignored Compose environment source. Evidence: Compose validation and
+  container presence check; the value was not displayed.
+- [-] Validate schema, length, prohibited empty fields, chunk identity, source
+  grounding, Vietnamese output, and the two-emoji maximum. Structural, length,
+  identity, hashtag, and emoji validation are implemented; language quality and
+  grounding checks remain.
 - [ ] Retry only invalid or transiently failed content items with bounded backoff.
 - [ ] Store only the selected result while preserving attempt provenance.
 

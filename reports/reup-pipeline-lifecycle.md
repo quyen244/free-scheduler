@@ -15,7 +15,7 @@ implements every stage.
 
 Included:
 
-- YouTube URL submission, validation, rights, and deduplication.
+- YouTube URL submission, media validation, and deduplication.
 - Whole 16:9 YouTube output and variable 4-5 minute 9:16 chunks.
 - Whole-video and per-chunk OpenAI metadata generation.
 - Brand profiles containing platform accounts, watermark, and signature music.
@@ -96,7 +96,7 @@ Ownership boundary:
 
 ~~~mermaid
 flowchart TD
-    S[Submit YouTube URL] --> V[Validate rights, media, duration,<br/>resolution, identity, and duplicate state]
+    S[Submit YouTube URL] --> V[Validate media, duration,<br/>resolution, identity, and duplicate state]
     V -->|Invalid| NA[needs_action: explain problem]
     NA -->|Correct and resume| V
     V -->|Valid| I[Ingest or stage source]
@@ -245,7 +245,7 @@ publishing state.
 |---|---|---|---|
 | Transient | network timeout, HTTP 429, provider 5xx | retry up to three times with backoff | show attempt count; alert only after exhaustion |
 | Invalid input | corrupt file, below 720p, outside 5-20 minutes | do not retry | explain the exact rule and allow replacement |
-| Missing configuration | rights unknown, music missing, expired credential | do not retry | show the missing item and direct fix/reconnect action |
+| Missing configuration | music missing or expired credential | do not retry | show the missing item and direct fix/reconnect action |
 | Derived output invalid | corrupt render, wrong ratio, missing audio | retry affected render once, then pause | inspect validation result and retry failed stage |
 | Stale revision | metadata, brand, target, or visual edit after approval | invalidate approval | prepare new revision and send approval again |
 | Partial publish | one target fails after peers succeed | keep successes; retry failed target only | show partial result and safe retry action |

@@ -19,7 +19,6 @@
       "duration_s": 300,
       "width": 1280,
       "height": 720,
-      "rights_status": "owned",
       "expected_chunk_count": 1,
       "expected_chunk_durations_s": [300]
     },
@@ -29,7 +28,6 @@
       "duration_s": 540,
       "width": 1920,
       "height": 1080,
-      "rights_status": "licensed",
       "expected_chunk_count": 1,
       "expected_chunk_durations_s": [540]
     },
@@ -39,7 +37,6 @@
       "duration_s": 600,
       "width": 1920,
       "height": 1080,
-      "rights_status": "permission",
       "expected_chunk_count": 2,
       "expected_chunk_durations_s": [300, 300]
     },
@@ -49,7 +46,6 @@
       "duration_s": 822,
       "width": 1920,
       "height": 1080,
-      "rights_status": "public_domain",
       "expected_chunk_count": 3,
       "expected_chunk_durations_s": [274, 274, 274]
     },
@@ -59,7 +55,6 @@
       "duration_s": 1200,
       "width": 3840,
       "height": 2160,
-      "rights_status": "owned",
       "expected_chunk_count": 4,
       "expected_chunk_durations_s": [300, 300, 300, 300]
     }
@@ -68,7 +63,6 @@
     {"id": "too_short", "duration_s": 299, "expected_error": "duration"},
     {"id": "too_long", "duration_s": 1201, "expected_error": "duration"},
     {"id": "low_resolution", "height": 719, "expected_error": "resolution"},
-    {"id": "corrupt", "readable": false, "expected_error": "corrupt"},
-    {"id": "unknown_rights", "rights_status": "unknown", "expected_error": "rights"}
+    {"id": "corrupt", "readable": false, "expected_error": "corrupt"}
   ]
 }

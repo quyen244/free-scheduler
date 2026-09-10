@@ -3,6 +3,7 @@ import logging
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 
@@ -13,9 +14,14 @@ import validation
 
 logger = logging.getLogger(__name__)
 
-_VIDEO_ID_PATTERN = re.compile(
-    r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})"
-)
+_VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_YOUTUBE_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+}
+_SHORT_HOSTS = {"youtu.be", "www.youtu.be"}
 
 RAW_NAME = "raw.mp4"
 AUDIO_NAME = "audio.wav"
@@ -25,10 +31,26 @@ _PARTIAL_PREFIX = "raw.part"
 
 
 def extract_video_id(url: str) -> str:
-    match = _VIDEO_ID_PATTERN.search(url)
-    if not match:
+    """Return one stable ID for supported, genuine YouTube URL shapes."""
+    try:
+        parsed = urlparse(url.strip())
+        host = (parsed.hostname or "").lower()
+    except ValueError as exc:
+        raise InvalidURLError(f"not a recognizable YouTube URL: {url!r}") from exc
+
+    video_id: str | None = None
+    if parsed.scheme in {"http", "https"} and host in _SHORT_HOSTS:
+        video_id = parsed.path.strip("/").split("/", 1)[0]
+    elif parsed.scheme in {"http", "https"} and host in _YOUTUBE_HOSTS:
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if parsed.path.rstrip("/") == "/watch":
+            video_id = parse_qs(parsed.query).get("v", [None])[0]
+        elif len(path_parts) == 2 and path_parts[0] in {"shorts", "embed", "live"}:
+            video_id = path_parts[1]
+
+    if not video_id or not _VIDEO_ID_PATTERN.fullmatch(video_id):
         raise InvalidURLError(f"not a recognizable YouTube URL: {url!r}")
-    return match.group(1)
+    return video_id
 
 
 def video_dir(video_id: str) -> Path:
@@ -37,11 +59,8 @@ def video_dir(video_id: str) -> Path:
 
 def get_or_download(
     url: str,
-    rights_status: str,
-    rights_evidence: str | None = None,
 ) -> tuple[dict[str, object], bool]:
     video_id = extract_video_id(url)
-    validation.validate_rights(rights_status)
     directory = video_dir(video_id)
     raw = directory / RAW_NAME
     audio = directory / AUDIO_NAME
@@ -51,9 +70,17 @@ def get_or_download(
     # must not read as a cache hit, or the next stage gets a truncated file.
     if raw.is_file() and audio.is_file() and meta.is_file():
         record = json.loads(meta.read_text(encoding="utf-8"))
-        record = _validate_and_enrich(
-            record, raw, url, video_id, rights_status, rights_evidence
-        )
+        try:
+            record = _validate_and_enrich(record, raw, url, video_id)
+        except SourcePolicyError as exc:
+            pipeline_db.record_validation_failure(
+                video_id=video_id,
+                source_url=url,
+                title=str(record.get("title") or video_id),
+                error_code=exc.code,
+                error=str(exc),
+            )
+            raise
         meta.write_text(
             json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -70,16 +97,12 @@ def get_or_download(
         "duration_s": float(info.get("duration") or 0.0),
     }
     try:
-        record = _validate_and_enrich(
-            record, raw, url, video_id, rights_status, rights_evidence
-        )
+        record = _validate_and_enrich(record, raw, url, video_id)
     except SourcePolicyError as exc:
         pipeline_db.record_validation_failure(
             video_id=video_id,
             source_url=url,
             title=str(record["title"]),
-            rights_status=rights_status,
-            rights_evidence=rights_evidence,
             error_code=exc.code,
             error=str(exc),
         )
@@ -113,12 +136,6 @@ def _record_ingested(record: dict[str, object]) -> None:
         source_hash=str(record["source_hash"]),
         width=int(record["width"]),
         height=int(record["height"]),
-        rights_status=str(record["rights_status"]),
-        rights_evidence=(
-            str(record["rights_evidence"])
-            if record.get("rights_evidence") is not None
-            else None
-        ),
     )
 
 
@@ -127,8 +144,6 @@ def _validate_and_enrich(
     raw: Path,
     url: str,
     video_id: str,
-    rights_status: str,
-    rights_evidence: str | None,
 ) -> dict[str, object]:
     measured = validation.probe(raw)
     return {
@@ -139,8 +154,6 @@ def _validate_and_enrich(
         "width": measured.width,
         "height": measured.height,
         "source_hash": validation.sha256(raw),
-        "rights_status": rights_status,
-        "rights_evidence": rights_evidence,
         "validation_status": "valid",
     }
 

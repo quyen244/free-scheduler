@@ -1,21 +1,12 @@
-from typing import Literal
-
 from pydantic import BaseModel
-
-
-RightsStatus = Literal["owned", "licensed", "permission", "public_domain", "unknown"]
 
 
 class DownloadRequest(BaseModel):
     url: str
-    rights_status: RightsStatus = "unknown"
-    rights_evidence: str | None = None
 
 
 class JobRequest(BaseModel):
     url: str
-    rights_status: RightsStatus = "unknown"
-    rights_evidence: str | None = None
     # n8n's Wait-node resume URL. Optional so the endpoint stays usable from a
     # terminal, where there is nothing to resume.
     callback_url: str | None = None
@@ -40,4 +31,3 @@ class MediaResponse(BaseModel):
     width: int
     height: int
     source_hash: str
-    rights_status: str

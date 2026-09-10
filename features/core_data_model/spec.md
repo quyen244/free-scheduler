@@ -1,7 +1,7 @@
 # Core data model
 
 Priority: P1  
-Depends on: foundation and rights
+Depends on: foundation contract
 
 ## What it is
 

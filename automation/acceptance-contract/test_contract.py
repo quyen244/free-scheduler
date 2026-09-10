@@ -51,7 +51,7 @@ class PipelineAcceptanceContractTests(unittest.TestCase):
         self.assertEqual(len(self.snapshot()["chunks"]), 3)
         self.assertEqual(len(self.snapshot("twenty_minutes")["chunks"]), 4)
 
-    def test_invalid_source_boundaries_rights_resolution_and_corruption_are_blocked(self):
+    def test_invalid_source_boundaries_resolution_and_corruption_are_blocked(self):
         baseline = self.snapshot()["source"]
         for invalid in self.fixtures["invalid_sources"]:
             source = deepcopy(baseline)
@@ -62,12 +62,6 @@ class PipelineAcceptanceContractTests(unittest.TestCase):
                     any(invalid["expected_error"] in error for error in errors),
                     errors,
                 )
-
-        unknown_rights = self.snapshot()
-        unknown_rights["source"]["rights_status"] = "unknown"
-        with self.assertRaises(ContractViolation):
-            approve(unknown_rights, "revision-1", self.policy)
-
     def test_chunk_plan_is_contiguous_sentence_safe_and_complete(self):
         snapshot = self.snapshot()
         self.assertEqual([chunk["name"] for chunk in snapshot["chunks"]], ["part_1", "part_2", "part_3"])

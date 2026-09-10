@@ -8,7 +8,7 @@
 - [ ] Add regenerate-one-item without replacing selected peer metadata.
 - [ ] Add account selection and target-count preview.
 - [ ] Select brand profiles and preview their account, watermark, and music mapping.
-- [ ] Add rights, media, credential, and platform preflight summary.
+- [ ] Add media, credential, and platform preflight summary.
 - [ ] Label TikTok destinations as drafts/manual completion.
 - [ ] Add revision bump and approval invalidation after edits.
 - [ ] Rerender after visual/music/brand edits; skip rerender after post-text-only edits.

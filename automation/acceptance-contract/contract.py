@@ -11,7 +11,6 @@ from copy import deepcopy
 from math import ceil
 
 
-ALLOWED_RIGHTS = {"owned", "licensed", "permission", "public_domain"}
 RUNNABLE_TARGET_STATES = {
     "queued",
     "leased",
@@ -192,7 +191,6 @@ def build_snapshot(source_fixture: dict, policy: dict) -> dict:
             "width": source_fixture["width"],
             "height": source_fixture["height"],
             "readable": source_fixture.get("readable", True),
-            "rights_status": source_fixture["rights_status"],
         },
         "chunks": chunks,
         "brand": {
@@ -239,8 +237,6 @@ def validate_source(source: dict, policy: dict) -> list[str]:
         errors.append("duration: source must be between 5 and 20 minutes inclusive")
     if source.get("height", 0) < policy["min_source_height"]:
         errors.append("resolution: source height must be at least 720 pixels")
-    if source.get("rights_status") not in ALLOWED_RIGHTS:
-        errors.append("rights: a known allowed rights status is required")
     if not source.get("youtube_id") or not source.get("url", "").startswith(
         "https://www.youtube.com/watch?v="
     ):

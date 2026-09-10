@@ -93,8 +93,6 @@ def _add_source_validation_columns() -> None:
         "width": "INTEGER",
         "height": "INTEGER",
         "source_hash": "TEXT",
-        "rights_status": "TEXT NOT NULL DEFAULT 'unknown'",
-        "rights_evidence": "TEXT",
         "validation_status": "TEXT NOT NULL DEFAULT 'pending'",
         "validation_error_code": "TEXT",
     }
@@ -190,8 +188,6 @@ def record_ingested(
     source_hash: str | None = None,
     width: int | None = None,
     height: int | None = None,
-    rights_status: str = "unknown",
-    rights_evidence: str | None = None,
 ) -> None:
     """Create or refresh the parent row for a video that now has media on disk.
 
@@ -205,10 +201,10 @@ def record_ingested(
             """
             INSERT INTO videos (
                 video_id, source_url, title, duration_s, width, height,
-                source_hash, rights_status, rights_evidence, validation_status,
-                validation_error_code, stage, updated_at
+                source_hash, validation_status, validation_error_code, stage,
+                updated_at
             )
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'valid', NULL, 'ingested', ?)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'valid', NULL, 'ingested', ?)
             ON CONFLICT(video_id) DO UPDATE SET
                      source_url = excluded.source_url,
                      title      = excluded.title,
@@ -216,8 +212,6 @@ def record_ingested(
                      width      = excluded.width,
                      height     = excluded.height,
                      source_hash = excluded.source_hash,
-                     rights_status = excluded.rights_status,
-                     rights_evidence = excluded.rights_evidence,
                      validation_status = 'valid',
                      validation_error_code = NULL,
                      error      = NULL,
@@ -231,8 +225,6 @@ def record_ingested(
                 width,
                 height,
                 source_hash,
-                rights_status,
-                rights_evidence,
                 _now(),
             ),
         )
@@ -242,8 +234,6 @@ def record_validation_failure(
     video_id: str,
     source_url: str,
     title: str,
-    rights_status: str,
-    rights_evidence: str | None,
     error_code: str,
     error: str,
 ) -> None:
@@ -251,15 +241,13 @@ def record_validation_failure(
         conn.execute(
             """
             INSERT INTO videos (
-                video_id, source_url, title, rights_status, rights_evidence,
-                validation_status, validation_error_code, stage, error, updated_at
+                video_id, source_url, title, validation_status,
+                validation_error_code, stage, error, updated_at
             )
-                 VALUES (?, ?, ?, ?, ?, 'failed', ?, 'ingested', ?, ?)
+                 VALUES (?, ?, ?, 'failed', ?, 'ingested', ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
                      source_url = excluded.source_url,
                      title = excluded.title,
-                     rights_status = excluded.rights_status,
-                     rights_evidence = excluded.rights_evidence,
                      validation_status = 'failed',
                      validation_error_code = excluded.validation_error_code,
                      error = excluded.error,
@@ -269,8 +257,6 @@ def record_validation_failure(
                 video_id,
                 source_url,
                 title,
-                rights_status,
-                rights_evidence,
                 error_code,
                 error,
                 _now(),

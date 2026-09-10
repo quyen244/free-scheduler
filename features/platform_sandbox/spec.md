@@ -1,7 +1,7 @@
 # Platform sandbox
 
 Priority: P0  
-Depends on: foundation and rights
+Depends on: foundation contract
 
 ## What it is
 
@@ -35,4 +35,3 @@ flowchart LR
 The repository contains a redacted evidence note listing approved scopes,
 callback URLs, account identifiers, test result, and any review blockers for all
 three platforms.
-

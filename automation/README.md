@@ -1,7 +1,7 @@
 # Re-up automation
 
 This folder is the Docker deployment unit for the local video re-up pipeline.
-It contains n8n workflow files, four media services, shared pipeline code, local
+It contains n8n workflow files, five pipeline services, shared pipeline code, local
 model files, and runtime data.
 
 ## Start the pipeline
@@ -19,6 +19,16 @@ Docker host must have working NVIDIA container support.
 Open n8n at `http://localhost:5678`. The existing external `n8n_data` volume
 stores the n8n database and credentials. Moving this folder does not recreate
 or delete that volume.
+
+The Step 2 canonical workflow expects a Telegram message containing only a
+YouTube URL, for example:
+
+```text
+https://youtu.be/VIDEO_ID
+```
+
+The workflow extracts the first URL from the message and rejects input without
+a URL. No rights marker or additional input field is required.
 
 The canonical Git export is `workflows/reup-pipeline.json`. Export the live
 database workflow before editing this file, and review differences before an
@@ -39,6 +49,7 @@ for understanding earlier stages but are not the current workflow.
 | `workflows/` | Version-controlled n8n workflow exports. |
 | `shared/` | Shared job database and callback code. |
 | `media-service/` | Downloads and prepares the source media. |
+| `metadata-service/` | Defines and generates validated whole/chunk metadata. |
 | `whisper-transcript-service/` | Transcribes and splits the source video. |
 | `translate-service/` | Translates transcripts into Vietnamese. |
 | `render-service/` | Generates speech and renders final media. |

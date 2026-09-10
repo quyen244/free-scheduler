@@ -1,7 +1,7 @@
 # Media variants and manifest
 
 Priority: P2 prerequisite  
-Depends on: foundation and rights
+Depends on: foundation contract
 
 ## What it is
 

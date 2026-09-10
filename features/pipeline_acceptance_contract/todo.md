@@ -2,7 +2,7 @@
 
 - [x] Freeze 5:00, 9:00, 10:00, 13:42, and 20:00 reference fixtures.
 - [x] Freeze one-, two-, three-, four-, and zero-chunk behavior.
-- [x] Validate the 5-20 minute, 720p, readable-media, and known-rights gates.
+- [x] Validate the URL-only, 5-20 minute, 720p, and readable-media gates.
 - [x] Validate ordered, unique, balanced, sentence-safe chunk topology.
 - [x] Validate Vietnamese metadata shape, five hashtags, truthful-curiosity
   tone marker, and maximum two emojis.

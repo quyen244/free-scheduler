@@ -356,7 +356,7 @@
 
       const details = [
         ['Render complete', 'n8n + media services', 'Manifest contains one whole 1920×1080 file and three 1080×1920 chunk files, with checksums, durations, and warnings.', 'A signed event is upserted by source video ID and render revision.'],
-        ['Review queue', 'Next.js control plane', 'Rights status, previews, captions, product snapshot, target accounts, and warnings are visible.', 'Campaign revision 3 is READY_FOR_REVIEW; an outbox event owns notification delivery.'],
+        ['Review queue', 'Next.js control plane', 'Previews, captions, product snapshot, target accounts, and warnings are visible.', 'Campaign revision 3 is READY_FOR_REVIEW; an outbox event owns notification delivery.'],
         ['Telegram decision', 'Human approval', 'One MVP approval authorizes the whole campaign: YouTube whole video, all Facebook chunks, and all TikTok drafts for the selected accounts.', 'A one-use opaque token binds the operator, chat, campaign, revision, and expiry. Any edit creates revision 4 and invalidates it.'],
         ['Package targets', 'Campaign process manager', 'YouTube receives one whole 16:9 asset; Facebook and TikTok each receive all three 9:16 chunks.', 'Seven independent PublishTarget rows are created for one account on each platform.'],
         ['Publish fan-out', 'Durable publisher worker', 'Per-account leases, idempotency keys, external job IDs, rate limits, and retries are recorded.', 'Successful uploads are never repeated just because another platform or child action fails.'],
