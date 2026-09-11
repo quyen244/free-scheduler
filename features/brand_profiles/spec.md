@@ -39,11 +39,12 @@ flowchart LR
     BC --> T[Brand TikTok account]
 ```
 
-Signature music is mixed as a quiet background bed. The preferred enhanced
-behavior uses speech-aware ducking: music drops while narration is active,
-rises gently between speech, loops when needed, and fades at boundaries. Exact
-loudness and timing values must be calibrated against a reference fixture rather
-than guessed.
+Signature music is mixed as a quiet background bed. The calibrated mock profile
+uses `-24 dB` base gain and speech-aware compression with threshold `0.02`,
+ratio `8:1`, `20 ms` attack, and `450 ms` release. Music loops for the complete
+asset, fades in for `0.75 s`, and fades out for `1.0 s`. A frequency-isolated
+fixture verifies that the music falls during narration, remains present after
+the source music duration, and fades at both asset boundaries.
 
 ## State lifecycle
 

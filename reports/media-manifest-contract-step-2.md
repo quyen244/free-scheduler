@@ -78,7 +78,7 @@ as an immutable-revision conflict.
   Docker subset.
 - `20 passed` across `test_manifest.py`, `test_clean_landscape.py`, and
   `test_clean_vertical_and_brand.py`.
-- `45 passed, 59 deselected` for the model-free render-service contract suite
+- `48 passed, 59 deselected` for the model-free render-service contract suite
   with `pytest -q -m no_pipeline`.
 - The tests generated real short FFmpeg files and verified dimensions,
   streams, codecs, duration, bytes, and SHA-256 with real `ffprobe`.
@@ -96,14 +96,20 @@ as an immutable-revision conflict.
   clean vertical `part_1`, branded whole, and branded vertical `part_1` assets.
   Same-revision retry job `cd9b3b170c204875afcfc59ece35c068` reused the ready
   manifest.
+- The calibrated-music production pass, job
+  `ab1397127dec471a8a1365480b86c069`, produced ready revision 4 with four
+  correctly probed assets and zero failures.
 - Representative branded frames were inspected at six seconds:
   `reports/step2-revision3-branded-whole-frame.jpg` and
   `reports/step2-revision3-branded-part1-frame.jpg`.
+- `test_corrupt_brand_asset_retry_reuses_verified_peers` proved a corrupt
+  branded output can be rebuilt without re-encoding five verified peers.
+- `test_signature_music_ducks_loops_and_fades_without_lowering_speech`
+  verified the calibrated mock music mix with frequency-isolated narration and
+  music signals.
 
 ## Still pending
 
 - Run the full-length render fixture matrix once the Docker host has acceptable
   encode throughput or GPU encoding is available.
-- Wire `/media-revision/jobs` into the reviewed canonical n8n JSON and import
-  only after explicit review.
-- Calibrate signature-music loudness and speech ducking against fixtures.
+- Import the reviewed canonical n8n JSON only after explicit authorization.

@@ -12,9 +12,16 @@
   },
   "signature_music": {
     "file": "mock-signature.wav",
-    "volume_db": -30.0,
+    "volume_db": -24.0,
     "loop": true,
     "fade_in_s": 0.75,
-    "fade_out_s": 1.0
+    "fade_out_s": 1.0,
+    "ducking": {
+      "enabled": true,
+      "threshold": 0.02,
+      "ratio": 8.0,
+      "attack_ms": 20.0,
+      "release_ms": 450.0
+    }
   }
 }

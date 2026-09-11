@@ -38,8 +38,10 @@ Verified on September 9, 2026:
 - [x] Use `gpt-5.6-luna` with `reasoning.effort: none`; warn at an estimated
   `$0.02` per campaign without stopping work midway. The representative
   whole-video plus three-chunk fixture cost `$0.003704`.
-- [ ] Calibrate signature-music loudness, speech ducking, looping, fade, and
-  missing-file behavior against a fixture.
+- [x] Calibrate signature-music loudness, speech ducking, looping, fade, and
+  missing-file behavior against a fixture. Evidence:
+  `test_signature_music_ducks_loops_and_fades_without_lowering_speech` and
+  `test_missing_signature_music_fails_during_brand_preflight`.
 - [ ] Confirm Shopee Affiliate Open API `app_id` and `secret_key` availability.
 
 ## Step 0 - freeze the live workflow
@@ -107,13 +109,15 @@ Goal: make the local production path correct from input validation through
 metadata, branded rendering, and media output.
 
 Status: in progress. Source preflight, balanced chunk planning, metadata
-generation, the canonical n8n metadata gate, and the revisioned clean/branded
-media job are verified; the full-length fixture matrix and live n8n render
-wiring remain.
+generation, the canonical n8n metadata/media gates, and the revisioned
+clean/branded media job are verified; the full-length fixture matrix and live
+n8n import remain.
 
 - [ ] Complete [Source ingest and validation](source_ingest_validation/todo.md).
 - [ ] Complete [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md).
-- [ ] Complete the mock-profile work in [Brand profiles](brand_profiles/todo.md).
+- [x] Complete the mock-profile work in [Brand profiles](brand_profiles/todo.md).
+  Durable app models remain P1 work. Evidence: calibrated brand fixtures and
+  production endpoint job `ab1397127dec471a8a1365480b86c069`.
 - [ ] Complete [Media variants and manifest](media_variants_manifest/todo.md).
 - [x] Insert metadata generation after `Chunked` and before voice/render in the
   reviewed canonical JSON. Live import remains intentionally pending.
@@ -127,9 +131,10 @@ wiring remain.
   Evidence: `/media-revision/jobs` fixture job
   `f4f842d3e00c4288a3c5fa464351ed94` wrote
   `/data/jNQXAC9IVRw/outputs/clean/revision/3/whole-16x9.mp4`.
-- [-] Never use a concatenation of vertical chunks as the YouTube asset. The
-  new renderer reads `raw.mp4` directly; the current n8n render node still uses
-  the legacy endpoint until the variant job is ready.
+- [x] Never use a concatenation of vertical chunks as the YouTube asset. The
+  renderer reads `raw.mp4` directly, and the canonical n8n render node calls
+  `/media-revision/jobs`. Evidence:
+  [n8n media-revision integration](../reports/n8n-media-revision-integration-step-2.md).
 - [x] Produce `N` clean vertical chunk masters. Evidence:
   `test_complete_revision_creates_every_part_and_reuses_same_brand_verticals`
   covers two parts; the 19-second fixture wrote
@@ -147,8 +152,10 @@ wiring remain.
   same-revision retry job `cd9b3b170c204875afcfc59ece35c068` completed with
   the existing ready manifest and four assets.
 - [ ] Test 5-, 9-, 10-, 13:42-, and 20-minute fixtures inside Docker.
-- [ ] Test OpenAI transient failure and one corrupt-render recovery without
-  repeating successful stages.
+- [x] Test OpenAI transient failure and one corrupt-render recovery without
+  repeating successful stages. Evidence:
+  `test_selective_retry_persists_provenance_and_reuses_selected_results` and
+  `test_corrupt_brand_asset_retry_reuses_verified_peers`.
 - [x] Inspect representative frames from both layouts. Evidence:
   `reports/step2-revision3-branded-whole-frame.jpg` and
   `reports/step2-revision3-branded-part1-frame.jpg`.
@@ -176,13 +183,14 @@ Evidence:
 - [Step 2 progress](../reports/pipeline-step-2-progress.md)
 - [Metadata model fixture](../reports/metadata-model-fixture-2026-09-10.md)
 - [n8n metadata integration](../reports/n8n-metadata-integration-step-2.md)
+- [n8n media-revision integration](../reports/n8n-media-revision-integration-step-2.md)
 - [Media manifest contract](../reports/media-manifest-contract-step-2.md)
 - Render-service media revision Docker subset:
   `docker compose run --rm -e PYTHONPATH=/app -w /app render-service python -m pytest -q tests/test_manifest.py tests/test_clean_landscape.py tests/test_clean_vertical_and_brand.py`
   - 20 tests passed on September 10, 2026.
 - Render-service model-free contract suite:
   `docker compose run --rm -e PYTHONPATH=/app -w /app render-service python -m pytest -q -m no_pipeline`
-  - 45 tests passed, 59 deselected on September 10, 2026.
+  - 48 tests passed, 59 deselected on September 10, 2026.
 - Short fixture production endpoint:
   `/media-revision/jobs` for `jNQXAC9IVRw`, render revision 3, job
   `f4f842d3e00c4288a3c5fa464351ed94`: ready manifest, 4 assets, 0 failures.

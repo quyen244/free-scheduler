@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 import jobs
 import brand
 import library
+import render
 import voice
 from config import settings
 from errors import (
@@ -72,7 +73,13 @@ for error, status in (
 
 @app.get("/health")
 async def health() -> dict[str, object]:
-    return {"status": "ok", "model_loaded": voice.is_loaded()}
+    return {
+        "status": "ok",
+        "model_loaded": voice.is_loaded(),
+        # Surfaced on /health so an operator can see a CPU fallback
+        # before starting a render, not after waiting hours for one.
+        "encoding": render.encoder_choice().as_dict(),
+    }
 
 
 @app.get("/voices")

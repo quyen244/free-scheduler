@@ -67,9 +67,13 @@ Last updated: 2026-09-10
 - Use mock brand/music configuration until real brand assets are supplied.
 - Preserve the original YouTube visuals while replacing audio with the edited
   Vietnamese voice, adding subtitles, the brand watermark, and signature music.
-- Mix signature music as a quiet background bed. Automatic speech ducking is a
-  desired enhancement: lower music while speech is active and allow a gentle
-  rise between speech, with loop and fade behavior calibrated against fixtures.
+- Mix signature music as a quiet background bed. The mock profile uses a
+  `-24 dB` base gain, loops for the asset duration, fades in for `0.75 s`, and
+  fades out for `1.0 s`. Speech-aware compression uses threshold `0.02`, ratio
+  `8:1`, `20 ms` attack, and `450 ms` release so music falls during narration
+  and rises gently in gaps. A missing configured music file rejects the render
+  before FFmpeg starts; replacing the file and retrying the render stage reuses
+  verified assets.
 - TikTok uploads each 9:16 chunk as a draft for the MVP. Prepared caption and
   hashtags are copied during manual draft completion.
 - One Telegram approval temporarily authorizes the complete campaign revision
@@ -104,6 +108,4 @@ Last updated: 2026-09-10
 ## Pending decisions
 
 - Per-campaign metadata cost ceiling after measuring representative fixtures.
-- Exact signature-music loudness/ducking calibration and behavior when a
-  configured audio file is missing.
 - Whether Shopee Affiliate Open API credentials are available.

@@ -61,7 +61,7 @@ explicitly reviewed and imported.
 
 - Metadata-service Docker tests: `36 passed`.
 - Shared callback regression tests: `2 passed`.
-- Canonical workflow contract tests: `7 passed`.
+- Canonical workflow metadata/media contract tests: `11 passed`.
 - Isolated n8n CLI import: successful with 36 nodes and `active: false`; it used
   a temporary n8n user folder and did not touch the external `n8n_data` volume.
 - Live model fixture: one whole-video result plus three chunk results passed at

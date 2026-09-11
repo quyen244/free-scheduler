@@ -75,6 +75,80 @@ class MetadataWorkflowContractTests(unittest.TestCase):
         self.assertEqual(checks["={{ $json.body.state }}"], "done")
         self.assertEqual(checks["={{ $json.body.result.state }}"], "selected")
 
+    def test_selected_metadata_carries_stable_render_revision_inputs(self):
+        assignments = {
+            item["name"]: item["value"]
+            for item in self.nodes["Metadata selected"]["parameters"]["assignments"][
+                "assignments"
+            ]
+        }
+        self.assertEqual(
+            assignments["metadata_revision_id"],
+            "={{ $json.body.result.revision_id }}",
+        )
+        self.assertEqual(
+            assignments["metadata_revision_number"],
+            "={{ $json.body.result.revision_number }}",
+        )
+
+    def test_render_stage_uses_media_revision_contract(self):
+        start = self.nodes["Start render"]
+        self.assertEqual(start["parameters"]["method"], "POST")
+        self.assertEqual(
+            start["parameters"]["url"],
+            "http://render-service:8003/media-revision/jobs",
+        )
+        body = {
+            item["name"]: item["value"]
+            for item in start["parameters"]["bodyParameters"]["parameters"]
+        }
+        self.assertIn("Transcribe", body["video_id"])
+        self.assertIn("metadata_revision_number", body["render_revision"])
+        self.assertEqual(body["brand_ids"], "={{ ['mock-brand'] }}")
+        self.assertIn("metadata_revision_id", body["metadata_revision_id"])
+        self.assertIn("http://n8n:5678/webhook-waiting/", body["callback_url"])
+        self.assertNotIn(
+            "http://render-service:8003/render/jobs",
+            WORKFLOW_PATH.read_text(encoding="utf-8"),
+        )
+
+    def test_render_completion_requires_a_ready_zero_failure_manifest(self):
+        conditions = self.nodes["Render ok?"]["parameters"]["conditions"]
+        self.assertEqual(conditions["combinator"], "and")
+        checks = {
+            item["leftValue"]: item["rightValue"]
+            for item in conditions["conditions"]
+        }
+        self.assertEqual(checks["={{ $json.body.state }}"], "done")
+        self.assertEqual(
+            checks["={{ $json.body.result.manifest_state }}"], "ready"
+        )
+        self.assertEqual(checks["={{ $json.body.result.failure_count }}"], 0)
+
+        rendered = {
+            item["name"]: item["value"]
+            for item in self.nodes["Rendered"]["parameters"]["assignments"][
+                "assignments"
+            ]
+        }
+        self.assertIn("manifest_path", rendered)
+        self.assertIn("revision_manifest_path", rendered)
+        self.assertIn("asset_count", rendered)
+        self.assertNotIn("processed_path", rendered)
+
+    def test_render_failure_exposes_typed_failures_and_recovery(self):
+        failed = {
+            item["name"]: item["value"]
+            for item in self.nodes["Render failed"]["parameters"]["assignments"][
+                "assignments"
+            ]
+        }
+        self.assertIn("failures", failed)
+        alert = self.nodes["Send a text message3"]
+        self.assertIn("chatId", alert["parameters"]["chatId"])
+        self.assertIn("Retry render stage", alert["parameters"]["text"])
+        self.assertIn("verified assets will be reused", alert["parameters"]["text"])
+
     def test_failure_message_uses_real_chat_and_explains_recovery(self):
         rejected = self.nodes["Send a text message"]
         failure = self.nodes["Metadata needs action"]

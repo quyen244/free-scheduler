@@ -219,6 +219,13 @@ services:
       # builds a CPU session without complaining otherwise, and the stage just
       # runs slowly with nothing in the log to say why.
       TTS_PROVIDER: cuda
+      # The CUDA base image defaults this to `compute,utility`, which is enough
+      # for ONNX Runtime and nvidia-smi but not for NVENC: without `video` the
+      # runtime never injects libnvidia-encode.so.1, so `ffmpeg -encoders`
+      # still lists h264_nvenc while every attempt to open it fails with
+      # "Cannot load libnvidia-encode.so.1" and the render falls back to CPU
+      # libx264. `video` is what makes the hardware encoder actually reachable.
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
     healthcheck:
       test:
         - CMD-SHELL

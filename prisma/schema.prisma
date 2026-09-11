@@ -8,20 +8,20 @@ datasource db {
 }
 
 model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
+  id                       String  @id @default(cuid())
+  userId                   String
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String? @db.Text
+  access_token             String? @db.Text
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String? @db.Text
+  session_state            String?
   refresh_token_expires_in Int?
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
@@ -35,15 +35,15 @@ model Session {
 }
 
 model User {
-  id            String          @id @default(cuid())
-  name          String?
-  email         String?         @unique
-  emailVerified DateTime?
-  image         String?
-  credits       Int             @default(10)
-  youtubeLabel  String?
-  accounts      Account[]
-  sessions      Session[]
+  id             String          @id @default(cuid())
+  name           String?
+  email          String?         @unique
+  emailVerified  DateTime?
+  image          String?
+  credits        Int             @default(10)
+  youtubeLabel   String?
+  accounts       Account[]
+  sessions       Session[]
   scheduledPosts ScheduledPost[]
 }
 
@@ -56,29 +56,221 @@ model VerificationToken {
 }
 
 model ScheduledPost {
-  id            String    @id @default(cuid())
-  userId        String
-  accountId     Int
-  platform      String
-  accountName   String
-  mediaUrl      String    @db.Text
-  title         String    @db.Text
-  description   String?   @db.Text
-  tags          String?   @db.Text
-  privacy       String    @default("public")
-  disableComment Boolean  @default(false)
-  disableDuet    Boolean  @default(false)
-  disableStitch  Boolean  @default(false)
-  categoryId    String?
-  madeForKids   Boolean   @default(false)
-  scheduledAt   DateTime
-  status        String    @default("scheduled")
-  requestId     String?   @unique
-  publishedUrl  String?   @db.Text
-  publishResult String?   @db.Text
-  publishedAt   DateTime?
-  error         String?   @db.Text
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String    @id @default(cuid())
+  userId         String
+  accountId      Int
+  platform       String
+  accountName    String
+  mediaUrl       String    @db.Text
+  title          String    @db.Text
+  description    String?   @db.Text
+  tags           String?   @db.Text
+  privacy        String    @default("public")
+  disableComment Boolean   @default(false)
+  disableDuet    Boolean   @default(false)
+  disableStitch  Boolean   @default(false)
+  categoryId     String?
+  madeForKids    Boolean   @default(false)
+  scheduledAt    DateTime
+  status         String    @default("scheduled")
+  requestId      String?   @unique
+  publishedUrl   String?   @db.Text
+  publishResult  String?   @db.Text
+  publishedAt    DateTime?
+  error          String?   @db.Text
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Campaign control plane.
+//
+// The app owns campaign identity, lifecycle, and audit history; n8n and the
+// automation services own media production. The join between them is
+// SourceVideo.platformVideoId, which is the `videos.video_id` key in
+// automation/data/pipeline.db. Nothing here duplicates render state — a
+// campaign records which stage it reached and why it stopped, not how a chunk
+// was encoded.
+// ---------------------------------------------------------------------------
+
+enum CampaignState {
+  pending
+  running
+  // A typed, resumable stop. `failed` deliberately keeps the campaign live so
+  // an operator has to choose between resume and force-new instead of a second
+  // campaign appearing for the same source by accident.
+  failed
+  awaiting_approval
+  published
+  // Retired by force-new. Terminal, but its revisions, attempts, and events
+  // stay exactly as they were.
+  superseded
+}
+
+enum PipelineStage {
+  ingest
+  transcribe
+  translate
+  chunk
+  metadata
+  render
+  approval
+  publish
+  complete
+}
+
+enum AttemptState {
+  running
+  succeeded
+  failed
+}
+
+enum RevisionState {
+  draft
+  ready
+  superseded
+}
+
+model SourceVideo {
+  id String @id @default(cuid())
+
+  sourceUrl       String  @db.Text
+  // Content identity, not URL identity: the same video re-uploaded under a new
+  // URL is the same source, and a campaign for it is a duplicate.
+  sourceHash      String  @unique
+  // `videos.video_id` in the automation pipeline database, when ingest has run.
+  platformVideoId String?
+  durationS       Float?
+  width           Int?
+  height          Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaigns Campaign[]
+
+  @@index([platformVideoId])
+}
+
+model Campaign {
+  id             String @id @default(cuid())
+  sourceVideoId  String
+  // 1, 2, 3... per source. Force-new increments it, so the chain of attempts on
+  // one source stays readable and the previous campaign keeps its number.
+  attemptOrdinal Int
+
+  state          CampaignState @default(pending)
+  // The stage that still has to run, not the last one that finished. Resume
+  // therefore retries exactly where the campaign stopped, and a success is what
+  // moves this forward.
+  stage          PipelineStage @default(ingest)
+  failureCode    String?
+  failureMessage String?       @db.Text
+
+  // Holds sourceVideoId while the campaign is live and NULL once it is
+  // published or superseded. Postgres treats NULLs as distinct in a unique
+  // index, so this single column is a partial "at most one live campaign per
+  // source" constraint that survives `prisma migrate` without raw SQL.
+  activeSourceKey String? @unique
+
+  // Set by whoever created this campaign. Two racing force-new requests derive
+  // the same key, so the unique index collapses them into one campaign instead
+  // of two, and a network retry of a successful POST returns the first result.
+  creationKey String @unique
+
+  // Forward link written when force-new retires this campaign. The old
+  // campaign is never deleted or rewritten beyond this and its state.
+  supersededById String?   @unique
+  supersededBy   Campaign? @relation("CampaignSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes     Campaign? @relation("CampaignSupersession")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sourceVideo SourceVideo         @relation(fields: [sourceVideoId], references: [id], onDelete: Restrict)
+  revisions   CampaignRevision[]
+  attempts    ProcessingAttempt[]
+  events      CampaignEvent[]
+
+  @@unique([sourceVideoId, attemptOrdinal])
+  @@index([state])
+}
+
+model CampaignRevision {
+  id             String @id @default(cuid())
+  campaignId     String
+  revisionNumber Int
+
+  state        RevisionState @default(draft)
+  // Fingerprint of everything that defines the revision's output: source hash,
+  // metadata revision, model, prompt version, brand, selected accounts. Unique
+  // per campaign, which is what makes revision creation idempotent and what
+  // forces a new revision when any input changes.
+  inputsHash   String
+  manifestPath String?       @db.Text
+
+  createdAt DateTime  @default(now())
+  // Once set, the revision's artifacts are immutable. A change after this
+  // point creates the next revision instead of editing this one.
+  frozenAt  DateTime?
+
+  campaign Campaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  attempts ProcessingAttempt[]
+
+  @@unique([campaignId, revisionNumber])
+  @@unique([campaignId, inputsHash])
+}
+
+model ProcessingAttempt {
+  id            String  @id @default(cuid())
+  campaignId    String
+  revisionId    String?
+  attemptNumber Int
+
+  stage PipelineStage
+  state AttemptState  @default(running)
+
+  // Deterministic when the caller supplies nothing: two clicks on Resume derive
+  // the same key and the second one returns the first attempt rather than
+  // starting a duplicate render.
+  idempotencyKey String @unique
+
+  failureCode    String?
+  failureMessage String?  @db.Text
+  retryable      Boolean?
+
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  // Held by the worker that is executing this attempt. An expired lease is what
+  // lets a restart take the work over without a second attempt row.
+  leaseExpiresAt DateTime?
+
+  campaign Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  revision CampaignRevision? @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+
+  @@unique([campaignId, attemptNumber])
+  @@index([state, leaseExpiresAt])
+}
+
+// Append-only. Nothing in the system updates or deletes a row here, which is
+// what makes force-new safe: the retired campaign's history is still readable.
+model CampaignEvent {
+  id         String @id @default(cuid())
+  campaignId String
+  // Gapless per campaign. The unique index is also the concurrency guard: two
+  // writers cannot claim the same position in one campaign's history.
+  sequence   Int
+
+  type      String
+  fromState CampaignState?
+  toState   CampaignState?
+  payload   Json?
+
+  createdAt DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, sequence])
+  @@index([campaignId, createdAt])
 }

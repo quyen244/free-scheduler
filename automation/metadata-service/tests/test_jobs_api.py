@@ -96,6 +96,7 @@ def test_successful_job_adds_soft_cost_warning_without_stopping(tmp_path, monkey
         jobs.repository,
         "revision_bundle",
         lambda revision_id: {
+            "revision": {"revision_number": 7},
             "usage": {"input_tokens": 10_000, "output_tokens": 2_000, "total_tokens": 12_000}
         },
     )
@@ -105,5 +106,6 @@ def test_successful_job_adds_soft_cost_warning_without_stopping(tmp_path, monkey
 
     job = pipeline_db.get_job(job_id)
     assert job["state"] == "done"
+    assert job["result"]["revision_number"] == 7
     assert job["result"]["estimated_cost_usd"] == 0.0044
     assert len(job["warnings"]) == 1

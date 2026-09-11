@@ -31,12 +31,21 @@ class Watermark(StrictModel):
     opacity: float = Field(gt=0, le=1)
 
 
+class SpeechDucking(StrictModel):
+    enabled: Literal[True] = True
+    threshold: float = Field(gt=0, le=1)
+    ratio: float = Field(ge=1, le=20)
+    attack_ms: float = Field(ge=0.01, le=2000)
+    release_ms: float = Field(ge=50, le=9000)
+
+
 class SignatureMusic(StrictModel):
     file: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
     volume_db: float = Field(ge=-50, le=-12)
     loop: Literal[True] = True
     fade_in_s: float = Field(ge=0, le=5)
     fade_out_s: float = Field(ge=0, le=5)
+    ducking: SpeechDucking
 
 
 class MockBrandProfile(StrictModel):

@@ -29,6 +29,8 @@
 - [x] Add preflight checks for missing/corrupt/mismatched outputs. Evidence:
   endpoint preflight rejects missing brand music before queueing, and the
   manifest validator rejects invalid assets before `ready`.
+  `test_corrupt_brand_asset_retry_reuses_verified_peers` proves the same
+  revision repairs only the corrupt asset and preserves verified peers.
 - [ ] Test 5-, 9-, 10-, 13:42-, and 20-minute fixtures in Docker.
 - [x] Test two brands never share branded paths or signature music. Evidence:
   `test_clean_vertical_and_brand.py::test_two_brands_keep_separate_paths_and_signature_music`.

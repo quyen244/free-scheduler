@@ -130,6 +130,10 @@ def run_media_revision(
             ),
             "asset_count": len(media_manifest.assets),
             "failure_count": len(media_manifest.failures),
+            # Which encoder actually ran, and why it was not the preferred one.
+            # A CPU fallback turns minutes into hours, so it travels with the
+            # result instead of living only in the container log.
+            "encoding": render.encoder_choice().as_dict(),
             "assets": [asset.model_dump(mode="json") for asset in media_manifest.assets],
             "failures": [failure.model_dump(mode="json") for failure in media_manifest.failures],
         }

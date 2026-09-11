@@ -9,8 +9,10 @@
 - [x] Confirm a temporary mock brand/music configuration.
 - [x] Confirm signature music is a quiet background bed.
 - [x] Confirm automatic speech ducking is desired when practical.
-- [ ] Calibrate loudness, ducking threshold/gain, looping, fades, and
-  missing-file behavior against a fixture.
+- [x] Calibrate loudness, ducking threshold/gain, looping, fades, and
+  missing-file behavior against a fixture. Evidence:
+  `test_signature_music_ducks_loops_and_fades_without_lowering_speech` and
+  `test_missing_signature_music_fails_during_brand_preflight`.
 
 ## Mock pipeline profile
 

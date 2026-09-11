@@ -1,8 +1,10 @@
 import json
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
+import library
 from config import settings
 from main import app
 from shared import pipeline_db
@@ -19,7 +21,22 @@ MEDIA_SERVICE = "http://media-service:8001"
 
 
 def _ingest(url: str) -> None:
+    """Make sure the fixture's audio exists, without re-running the source gate.
+
+    This service transcribes; it does not police the source. Media-service now
+    enforces the 5:00-20:00 delivery policy, which this deliberately short
+    fixture fails by design, so re-downloading it here would test the wrong
+    contract. An already-ingested fixture is the precondition, and when it is
+    absent the test skips instead of quietly passing on stale data.
+    """
+    if library.load(TEST_VIDEO_ID).audio_path.is_file():
+        return
     response = httpx.post(f"{MEDIA_SERVICE}/download", json={"url": url}, timeout=300)
+    if response.status_code == 422:
+        pytest.skip(
+            f"{TEST_VIDEO_ID} is not ingested and the source policy rejects it: "
+            f"{response.json().get('error_code')}"
+        )
     response.raise_for_status()
 
 

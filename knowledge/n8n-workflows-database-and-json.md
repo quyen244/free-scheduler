@@ -31,12 +31,13 @@ explicitly imported.
 
 The live database workflow was exported and round-trip verified on September 9,
 2026. On September 10, the canonical JSON was extended with the reviewed
-metadata gate. It has not been imported into the live database.
+metadata gate and media-revision render handoff. It has not been imported into
+the live database.
 
 | Version | Nodes | Last update |
 | --- | ---: | --- |
 | Live database `video editing` | 30 | September 10, 2026 export |
-| Canonical `reup-pipeline.json` | 36 | September 10, 2026 candidate |
+| Canonical `reup-pipeline.json` | 36 | September 10, 2026 media-revision candidate |
 | `f7-render.json` | 24 | September 7, 2026 |
 | Live-to-canonical difference | 6 metadata nodes | Import pending |
 
@@ -73,8 +74,13 @@ flowchart LR
     F --> T[Telegram needs action]
 ```
 
-The canonical JSON passed seven structural contract tests and imported into an
+The canonical JSON passed eleven structural contract tests and imported into an
 isolated n8n database. This validation did not touch the live `n8n_data` volume.
+
+After voice generation, the canonical `Start render` node calls
+`/media-revision/jobs`. Its success gate requires a completed job, a `ready`
+manifest, and zero asset failures; the output is the manifest path rather than
+the legacy ambiguous `processed_path`.
 
 ## Current live workflow
 

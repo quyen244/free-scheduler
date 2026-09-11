@@ -52,7 +52,8 @@ def run(job_id: str, video_id: str, model: str) -> None:
             error="Metadata generation failed internally; retry the metadata stage.",
         )
     else:
-        usage = repository.revision_bundle(result["revision_id"])["usage"]
+        bundle = repository.revision_bundle(result["revision_id"])
+        usage = bundle["usage"]
         input_rate = Decimal(os.environ.get("OPENAI_INPUT_USD_PER_MILLION", "0.20"))
         output_rate = Decimal(os.environ.get("OPENAI_OUTPUT_USD_PER_MILLION", "1.20"))
         warning_threshold = Decimal(os.environ.get("METADATA_COST_WARNING_USD", "0.02"))
@@ -62,6 +63,7 @@ def run(job_id: str, video_id: str, model: str) -> None:
         ) / Decimal(1_000_000)
         result = {
             **result,
+            "revision_number": int(bundle["revision"]["revision_number"]),
             "usage": usage,
             "estimated_cost_usd": float(estimated_cost),
         }

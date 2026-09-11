@@ -225,9 +225,11 @@ docker compose run --rm -e PYTHONPATH=/app -w /app render-service \
   python create_mock_brand_assets.py
 ```
 
-The mock mix is intentionally conservative: quiet looped background music with
-short fades. Speech-aware ducking remains pending fixture calibration and is
-reported as a warning in the manifest.
+The calibrated mock mix uses a `-24 dB` looped background bed with `0.75 s`
+fade-in and `1.0 s` fade-out. Speech-aware compression uses threshold `0.02`,
+ratio `8:1`, `20 ms` attack, and `450 ms` release. The manifest warns that the
+mock brand assets must be replaced before publishing; the mix itself is covered
+by a frequency-isolated FFmpeg fixture.
 
 ### `POST /render/jobs`
 

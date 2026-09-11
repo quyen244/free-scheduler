@@ -259,8 +259,7 @@ def render_media_revision(
         assets=assets,
         failures=failures,
         warnings=[
-            "mock brand music levels are provisional; speech ducking remains disabled "
-            "until fixture calibration"
+            "mock brand assets are for pipeline verification only; replace them before publishing"
         ],
     )
     manifest.write_manifest(result)

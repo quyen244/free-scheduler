@@ -11,6 +11,7 @@ import json
 import logging
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -55,33 +56,153 @@ def probe(path: Path) -> Source:
     )
 
 
+PREFERRED_ENCODER = "h264_nvenc"
+FALLBACK_ENCODER = "libx264"
+
+# NVENC refuses frames below roughly 145x49 with "Frame Dimension less than the
+# minimum supported value", so a probe canvas has to clear that bar or it fails
+# on a perfectly working GPU and the whole pipeline silently drops to the CPU.
+# 256x256 is comfortably above the floor and still costs a single frame.
+_PROBE_SIZE = "256x256"
+
+
+@dataclass(frozen=True)
+class EncoderChoice:
+    """Which encoder was asked for, which one runs, and why they differ."""
+
+    requested: str
+    selected: str
+    fallback_reason: str | None
+
+    @property
+    def is_hardware(self) -> bool:
+        return self.selected == PREFERRED_ENCODER
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "requested_encoder": self.requested,
+            "selected_encoder": self.selected,
+            "hardware": self.is_hardware,
+            "fallback_reason": self.fallback_reason,
+        }
+
+
 @lru_cache(maxsize=1)
-def encoder() -> str:
+def encoder_choice() -> EncoderChoice:
     """Pick the h264 encoder once, by trying it rather than by asking.
 
     `ffmpeg -encoders` lists h264_nvenc whenever the binary was built with it,
-    which says nothing about whether this container can reach a GPU. A
-    one-frame encode is the only answer that is not a guess.
+    which says nothing about whether this container can reach a GPU. A real
+    encode is the only answer that is not a guess.
+
+    The probe uses the same encoder arguments production does, so an argument
+    the GPU rejects is discovered here rather than minutes into a render. When
+    it fails, the ffmpeg error is kept and reported: a CPU fallback that costs
+    hours must never be invisible.
     """
     probe_command = [
         "ffmpeg", "-y", "-loglevel", "error",
-        "-f", "lavfi", "-i", "color=black:s=64x64:d=0.1",
-        "-c:v", "h264_nvenc", "-f", "null", "-",
+        "-f", "lavfi", "-i", f"color=black:s={_PROBE_SIZE}:d=0.1",
+        *_encoder_args(PREFERRED_ENCODER, {}), "-pix_fmt", "yuv420p",
+        "-f", "null", "-",
     ]
     try:
         subprocess.run(probe_command, check=True, capture_output=True, text=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        logger.info("h264_nvenc is not usable here; encoding on the CPU with libx264")
-        return "libx264"
-    logger.info("encoding with h264_nvenc")
-    return "h264_nvenc"
+    except FileNotFoundError as exc:
+        reason = f"ffmpeg binary is not on PATH: {exc}"
+    except subprocess.CalledProcessError as exc:
+        reason = _fallback_reason(exc.stderr or "")
+    else:
+        logger.info(
+            "encoder probe: selected=%s hardware=True",
+            PREFERRED_ENCODER,
+        )
+        return EncoderChoice(PREFERRED_ENCODER, PREFERRED_ENCODER, None)
+
+    logger.warning(
+        "encoder probe: requested=%s unusable, falling back to selected=%s "
+        "hardware=False reason=%s",
+        PREFERRED_ENCODER, FALLBACK_ENCODER, reason,
+    )
+    return EncoderChoice(PREFERRED_ENCODER, FALLBACK_ENCODER, reason)
+
+
+def _fallback_reason(stderr: str) -> str:
+    """Classify why the hardware encoder is unusable, keeping ffmpeg's words.
+
+    The classes are the ones that actually occur on this stack and each points
+    at a different fix, so a typed reason is worth more than a raw dump.
+    """
+    text = stderr.strip()
+    lowered = text.lower()
+    if "libnvidia-encode" in lowered:
+        code = "driver_encode_library_missing"
+    elif "frame dimension" in lowered:
+        code = "probe_dimensions_rejected"
+    elif "unknown encoder" in lowered or "not found" in lowered:
+        code = "encoder_not_built_into_ffmpeg"
+    elif "no capable devices" in lowered or "no such device" in lowered:
+        code = "no_gpu_visible_to_container"
+    elif "out of memory" in lowered:
+        code = "gpu_out_of_memory"
+    else:
+        code = "hardware_encoder_open_failed"
+    detail = " | ".join(line for line in text.splitlines() if line.strip())
+    return f"{code}: {detail[-400:]}" if detail else code
+
+
+def _encoder_args(name: str, config: dict) -> list[str]:
+    quality = str(config.get("crf", 21))
+    if name == PREFERRED_ENCODER:
+        return ["-c:v", PREFERRED_ENCODER, "-preset", "p4", "-cq", quality]
+    return ["-c:v", FALLBACK_ENCODER, "-preset", "veryfast", "-crf", quality]
+
+
+def encoder() -> str:
+    """The encoder that will actually run. Kept for existing job payloads."""
+    return encoder_choice().selected
 
 
 def _encode_args(config: dict) -> list[str]:
-    chosen = encoder()
-    if chosen == "h264_nvenc":
-        return ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", str(config.get("crf", 21))]
-    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(config.get("crf", 21))]
+    return _encoder_args(encoder_choice().selected, config)
+
+
+def _run_encode(
+    command: list[str],
+    *,
+    stage: str,
+    content_item_id: str,
+    media_duration_s: float,
+    cwd: Path | None = None,
+) -> None:
+    """Run one encode, recording which encoder ran and how long it took.
+
+    A stage that costs minutes has to say so in the log with the encoder that
+    produced it. Without that line a CPU fallback and a slow filtergraph look
+    identical from the outside, and the speed multiple is what separates them.
+    """
+    choice = encoder_choice()
+    started = time.monotonic()
+    logger.info(
+        "encode start: stage=%s item=%s media_duration_s=%.3f "
+        "requested_encoder=%s selected_encoder=%s hardware=%s fallback_reason=%s",
+        stage, content_item_id, media_duration_s,
+        choice.requested, choice.selected, choice.is_hardware, choice.fallback_reason,
+    )
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, cwd=cwd)
+    except subprocess.CalledProcessError:
+        logger.error(
+            "encode failed: stage=%s item=%s selected_encoder=%s elapsed_s=%.3f",
+            stage, content_item_id, choice.selected, time.monotonic() - started,
+        )
+        raise
+    elapsed = time.monotonic() - started
+    logger.info(
+        "encode done: stage=%s item=%s selected_encoder=%s elapsed_s=%.3f speed_x=%.2f",
+        stage, content_item_id, choice.selected, elapsed,
+        (media_duration_s / elapsed) if elapsed > 0 else 0.0,
+    )
 
 
 def _blur_chain(regions: list[presets.Box], source: Source) -> tuple[list[str], str]:
@@ -329,11 +450,11 @@ def render_clean_whole(
     ]
 
     try:
-        subprocess.run(
+        _run_encode(
             command,
-            check=True,
-            capture_output=True,
-            text=True,
+            stage="clean_whole",
+            content_item_id=manifests.WHOLE_ITEM,
+            media_duration_s=source.duration_s,
             cwd=output.parent,
         )
     except subprocess.CalledProcessError as exc:
@@ -472,11 +593,11 @@ def render_clean_vertical(
         str(partial),
     ]
     try:
-        subprocess.run(
+        _run_encode(
             command,
-            check=True,
-            capture_output=True,
-            text=True,
+            stage="clean_vertical",
+            content_item_id=content_item_id,
+            media_duration_s=duration_s,
             cwd=output.parent,
         )
     except subprocess.CalledProcessError as exc:
@@ -504,9 +625,9 @@ def render_branded_variant(
 ) -> manifests.MediaAsset:
     """Derive one brand-specific video from a validated clean master.
 
-    The mock music settings are deliberately a quiet, looped bed with short
-    fades. Speech-aware ducking is not enabled until its thresholds have been
-    calibrated against representative narration fixtures.
+    The mock music settings are a quiet, looped bed with short fades. The clean
+    narration is also used as the sidechain so music falls during speech and
+    rises gently in gaps.
     """
     if clean_asset.role not in ("clean_whole", "clean_vertical"):
         raise RenderError("a branded variant must derive from a clean asset")
@@ -545,6 +666,7 @@ def render_branded_variant(
     fade_in = min(profile.signature_music.fade_in_s, duration_s / 2)
     fade_out = min(profile.signature_music.fade_out_s, duration_s / 2)
     fade_out_start = max(duration_s - fade_out, 0)
+    ducking = profile.signature_music.ducking
     colour = watermark.color.lstrip("#")
     font = presets.font_file("DejaVu Sans")
     filtergraph = (
@@ -552,13 +674,17 @@ def render_branded_variant(
         f"fontsize={font_size}:fontcolor=0x{colour}@{watermark.opacity}:"
         f"borderw={max(font_size // 18, 1)}:bordercolor=0x000000@{watermark.opacity}:"
         f"x={x}:y={y}[vout];"
-        "[0:a]aresample=48000,asetpts=PTS-STARTPTS[speech];"
+        "[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        "asetpts=PTS-STARTPTS,asplit=2[speech][sidechain];"
         f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
         f"volume={profile.signature_music.volume_db}dB,atrim=0:{duration_s:.3f},"
         f"afade=t=in:st=0:d={fade_in:.3f},"
         f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f},"
         "asetpts=PTS-STARTPTS[music];"
-        "[speech][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+        f"[music][sidechain]sidechaincompress=threshold={ducking.threshold:.6f}:"
+        f"ratio={ducking.ratio:.3f}:attack={ducking.attack_ms:.3f}:"
+        f"release={ducking.release_ms:.3f}[ducked];"
+        "[speech][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
         "alimiter=limit=0.98[aout]"
     )
     partial = output.with_name(f".{output.stem}.part.mp4")
@@ -593,11 +719,11 @@ def render_branded_variant(
         str(partial),
     ]
     try:
-        subprocess.run(
+        _run_encode(
             command,
-            check=True,
-            capture_output=True,
-            text=True,
+            stage=branded_role,
+            content_item_id=clean_asset.content_item_id,
+            media_duration_s=duration_s,
             cwd=output.parent,
         )
     except subprocess.CalledProcessError as exc:
@@ -608,11 +734,7 @@ def render_branded_variant(
         ) from exc
 
     partial.replace(output)
-    combined_warnings = [
-        "mock signature-music mix uses provisional -30 dB-style configuration; "
-        "speech ducking is pending fixture calibration",
-        *(warnings or []),
-    ]
+    combined_warnings = list(warnings or [])
     return manifests.inspect_expected_asset(
         clean_asset.video_id,
         clean_asset.render_revision,
