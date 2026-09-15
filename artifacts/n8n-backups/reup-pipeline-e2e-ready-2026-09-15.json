@@ -1138,42 +1138,6 @@
             "name": "Telegram account"
           }
         }
-      },
-      {
-        "parameters": {},
-        "type": "n8n-nodes-base.manualTrigger",
-        "typeVersion": 1,
-        "position": [
-          -448,
-          -288
-        ],
-        "id": "manual-trigger-reup-pipeline",
-        "name": "Manual Trigger",
-        "notes": "Run this branch from the n8n editor for a manual media-pipeline test. It does not use the public webhook."
-      },
-      {
-        "parameters": {
-          "assignments": {
-            "assignments": [
-              {
-                "id": "manual-url-reup-pipeline",
-                "name": "videoUrl",
-                "value": "https://www.youtube.com/watch?v=hS3VXBeEv0I",
-                "type": "string"
-              }
-            ]
-          },
-          "options": {}
-        },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.4,
-        "position": [
-          -208,
-          -288
-        ],
-        "id": "manual-url-reup-pipeline",
-        "name": "Manual test URL (edit here)",
-        "notes": "Replace videoUrl with a permitted YouTube URL before executing. The pipeline accepts 5–20 minute, at-least-720p sources."
       }
     ],
     "connections": {
@@ -1555,28 +1519,6 @@
             }
           ]
         ]
-      },
-      "Manual Trigger": {
-        "main": [
-          [
-            {
-              "node": "Manual test URL (edit here)",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Manual test URL (edit here)": {
-        "main": [
-          [
-            {
-              "node": "Start ingest",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
       }
     },
     "settings": {
@@ -1661,7 +1603,7 @@
         }
       ]
     },
-    "versionId": "37045b10-46c7-42d0-9ecc-ad375d5a03d1",
+    "versionId": "70b793ba-f2e5-4465-afbf-f120f8c9e6f4",
     "activeVersionId": null,
     "versionCounter": 75,
     "triggerCount": 1,

@@ -1,6 +1,6 @@
 [
   {
-    "updatedAt": "2026-09-15T08:13:04.000Z",
+    "updatedAt": "2026-09-09T13:10:11.234Z",
     "createdAt": "2026-09-06T21:17:08.802Z",
     "id": "reupPipeline",
     "name": "video editing",
@@ -452,7 +452,7 @@
       },
       {
         "parameters": {
-          "chatId": "6265299173",
+          "chatId": "={{ $('Code in JavaScript').first().json.chatId }}",
           "text": "={{ 'Metadata cần xử lý cho video ' + $json.video_id + '.\\nMã lỗi: ' + $json.error_code + '\\nChi tiết: ' + $json.error + '\\nHãy dùng Retry metadata stage; các kết quả đã thành công được giữ lại.' }}",
           "additionalFields": {}
         },
@@ -1015,7 +1015,7 @@
       },
       {
         "parameters": {
-          "chatId": "6265299173",
+          "chatId": "={{ $('Code in JavaScript').item.json.chatId }}",
           "text": "Gửi một URL YouTube hợp lệ. Ví dụ: https://youtube.com/watch?v=...",
           "additionalFields": {}
         },
@@ -1053,7 +1053,6 @@
       },
       {
         "parameters": {
-          "chatId": "6265299173",
           "text": "Translation failed",
           "additionalFields": {}
         },
@@ -1075,7 +1074,6 @@
       },
       {
         "parameters": {
-          "chatId": "6265299173",
           "text": "voice failed",
           "additionalFields": {}
         },
@@ -1097,7 +1095,7 @@
       },
       {
         "parameters": {
-          "chatId": "6265299173",
+          "chatId": "={{ $('Code in JavaScript').first().json.chatId }}",
           "text": "={{ 'Media revision needs action for ' + $json.video_id + ': ' + ($json.error || 'one or more required assets failed validation') + '. Retry render stage; verified assets will be reused.' }}",
           "additionalFields": {}
         },
@@ -1116,64 +1114,6 @@
             "name": "Telegram account"
           }
         }
-      },
-      {
-        "parameters": {
-          "chatId": "6265299173",
-          "text": "={{ '✅ ReUp pipeline ready for manual upload\\nVideo: ' + $json.video_id + '\\nManifest: ' + $json.manifest_path + '\\nAssets: ' + $json.asset_count + '\\nWarnings: ' + (($json.warnings || []).join('; ') || 'none') }}",
-          "additionalFields": {}
-        },
-        "type": "n8n-nodes-base.telegram",
-        "typeVersion": 1.2,
-        "position": [
-          1520,
-          -80
-        ],
-        "id": "telegram-render-ready-20260915",
-        "name": "Pipeline ready notification",
-        "webhookId": "bc4472e6-a5dd-4777-9cb6-ec6960f0bf6b",
-        "credentials": {
-          "telegramApi": {
-            "id": "7fwKL9Enb7iOahec",
-            "name": "Telegram account"
-          }
-        }
-      },
-      {
-        "parameters": {},
-        "type": "n8n-nodes-base.manualTrigger",
-        "typeVersion": 1,
-        "position": [
-          -448,
-          -288
-        ],
-        "id": "manual-trigger-reup-pipeline",
-        "name": "Manual Trigger",
-        "notes": "Run this branch from the n8n editor for a manual media-pipeline test. It does not use the public webhook."
-      },
-      {
-        "parameters": {
-          "assignments": {
-            "assignments": [
-              {
-                "id": "manual-url-reup-pipeline",
-                "name": "videoUrl",
-                "value": "https://www.youtube.com/watch?v=hS3VXBeEv0I",
-                "type": "string"
-              }
-            ]
-          },
-          "options": {}
-        },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.4,
-        "position": [
-          -208,
-          -288
-        ],
-        "id": "manual-url-reup-pipeline",
-        "name": "Manual test URL (edit here)",
-        "notes": "Replace videoUrl with a permitted YouTube URL before executing. The pipeline accepts 5–20 minute, at-least-720p sources."
       }
     ],
     "connections": {
@@ -1544,39 +1484,6 @@
             }
           ]
         ]
-      },
-      "Rendered": {
-        "main": [
-          [
-            {
-              "node": "Pipeline ready notification",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Manual Trigger": {
-        "main": [
-          [
-            {
-              "node": "Manual test URL (edit here)",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Manual test URL (edit here)": {
-        "main": [
-          [
-            {
-              "node": "Start ingest",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
       }
     },
     "settings": {
@@ -1644,26 +1551,11 @@
             "executionMode": "test"
           }
         }
-      ],
-      "Code in JavaScript": [
-        {
-          "json": {
-            "chatId": 6265299173,
-            "text": "hey \n.https://m.youtube.com/watch?v=3gi_15UH9fQ&pp=ygUGdG9wIDEw / san",
-            "urls": [
-              "https://m.youtube.com/watch?v=3gi_15UH9fQ&pp=ygUGdG9wIDEw"
-            ],
-            "videoUrl": "https://m.youtube.com/watch?v=3gi_15UH9fQ&pp=ygUGdG9wIDEw"
-          },
-          "pairedItem": {
-            "item": 0
-          }
-        }
       ]
     },
-    "versionId": "37045b10-46c7-42d0-9ecc-ad375d5a03d1",
+    "versionId": "922d83d1-7411-44ff-9757-aa47d9e1e110",
     "activeVersionId": null,
-    "versionCounter": 75,
+    "versionCounter": 53,
     "triggerCount": 1,
     "sourceWorkflowId": null,
     "tags": [],

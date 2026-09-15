@@ -239,21 +239,41 @@ byte sizes and SHA-256 values on September 11, 2026.
 
 Goal: prevent missing or corrupt media from entering review and publishing.
 
+The media-revision path already implements the asset-level gate as Step 2
+work. The remaining Step 3 work is to retire or repair the legacy render state
+and connect a valid manifest to the app-owned review state. For manual upload,
+an operator may use only a manifest whose state is `ready` and whose failure
+count is zero.
+
 - [x] Define and version the media manifest JSON schema. Evidence: committed
   `media-manifest.v1` schema and 12 Docker contract tests.
-- [ ] Run `ffprobe` on every required asset before render completion.
-- [ ] Verify that each file exists and can be opened.
-- [ ] Verify expected width, height, codec, duration, audio stream, video stream,
+- [x] Run `ffprobe` on every required asset before media-revision completion.
+- [x] Verify that each required asset exists and can be opened.
+- [x] Verify expected width, height, codec, duration, audio stream, video stream,
   and non-zero byte size.
-- [ ] Calculate and record SHA-256 for every asset.
-- [ ] Record warnings and validation failures in the manifest.
+- [x] Calculate and record SHA-256 for every asset.
+- [x] Record warnings and validation failures in the manifest.
 - [ ] Reproduce and fix the current corrupt `chunks/001/final.mp4` case.
 - [ ] Ensure a corrupt file cannot remain in the `rendered` state.
 - [ ] Set `ready_for_review` only after the complete manifest passes validation.
 
 Evidence:
 
-- Pending.
+- Docker Compose services were healthy on September 15, 2026.
+- `render-service` manifest, landscape, and vertical/brand suite: 23 passed in
+  52.75 seconds on September 15, 2026. The suite covers missing/corrupt assets,
+  dimensions, streams, codecs, duration, checksums, ready manifests, and safe
+  repair of invalid partial output.
+- Live n8n export `artifacts/n8n-backups/reup-pipeline-live-2026-09-15.json`
+  matches canonical structural behavior and its render gate requires `ready`
+  plus zero failures.
+- Cloudflare Tunnel and the configured Telegram input-rejection notification
+  were verified through public webhook execution 87 on September 15, 2026; the
+  workflow was unpublished again after the notification-only test.
+- The inactive canonical/live workflow now exposes `Manual Trigger -> Manual
+  test URL (edit here) -> Start ingest` and sends its manual-upload summary
+  only after the render gate receives a `ready` manifest with zero failures.
+  It has not yet run a new source end-to-end.
 
 Done when: removing, truncating, corrupting, or changing the ratio of any
 required output makes the pipeline fail before app handoff.

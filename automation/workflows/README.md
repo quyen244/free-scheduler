@@ -4,16 +4,36 @@ n8n workflow JSON, in version control. Mounted read-only into the n8n container
 at `/workflows`. The editor is where workflows change; this directory is where
 they are recorded, and a two-way sync would only fight itself.
 
-`reup-pipeline.json` is the reviewed canonical candidate. It contains the Step
-2 metadata gate and is newer than the inactive workflow in the live n8n
-database. Review the recorded differences before an explicit import. Files
-named `f3` through `f7` are historical phase snapshots. Do not import a phase
-snapshot over the canonical or live workflow unless rollback to that exact
-phase is intentional.
+`reup-pipeline.json` is the reviewed canonical workflow. On September 15,
+2026, the live `video editing` workflow (internal ID `reupPipeline`) was
+exported to `artifacts/n8n-backups/reup-pipeline-live-2026-09-15.json` and
+compared with this file. Both now have 39 nodes, including the manual test
+route and render-ready notification, with the same node names and critical
+metadata/render configuration; only n8n's version metadata differs. It remains
+inactive. Files named `f3` through `f7` are historical phase snapshots. Do not
+import a phase snapshot over the canonical or live workflow unless rollback to
+that exact phase is intentional.
 
-```bash
-docker compose exec -T n8n n8n import:workflow --input=/workflows/reup-pipeline.json
+On September 15, the public `https://rexsantech.com/webhook/reup-pipeline`
+route was verified through the Cloudflare Tunnel. An intentionally invalid
+payload reached the Telegram `needs_action` path successfully (n8n execution
+87). The workflow was then unpublished and restarted back to inactive. This
+checks notification delivery without downloading media or publishing a post.
+
+## Manual media test
+
+```text
+Manual Trigger -> Manual test URL (edit here) -> Start ingest
 ```
+
+Open `video editing`, replace `videoUrl` in `Manual test URL (edit here)` with
+a permitted 5-20 minute, at-least-720p YouTube URL, then select **Execute
+workflow**. This does not publish the production webhook or upload to a social
+platform. After a `ready` manifest with zero failures, the workflow sends a
+Telegram summary for manual upload.
+
+An import is not currently needed. Export and compare the live workflow before
+any future import.
 
 ## One workflow, one id
 

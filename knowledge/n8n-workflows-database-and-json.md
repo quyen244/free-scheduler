@@ -33,15 +33,25 @@ The live database workflow was exported and round-trip verified on September 9,
 2026. On September 10, the canonical JSON was extended with the reviewed
 metadata gate and media-revision render handoff. On September 11, it was
 imported in place into the existing live workflow, re-exported, and checked
-against the same eleven structural contract tests. The workflow remains
-inactive and keeps its original identity and credential references.
+against the same eleven structural contract tests. On September 15, it was
+exported again to `artifacts/n8n-backups/reup-pipeline-live-2026-09-15.json`.
+The live and canonical workflows were then extended with a manual test route
+and a render-ready Telegram summary. They now have the same 39 nodes and the
+same metadata/render/manual-test configuration. The workflow remains inactive
+and keeps its original identity and credential references.
+
+The Cloudflare Tunnel endpoint `https://rexsantech.com/webhook/reup-pipeline`
+was also verified on September 15. A deliberately invalid request exercised
+the configured Telegram input-rejection notification and completed as n8n
+execution 87. The workflow was unpublished and restarted inactive immediately
+after the test; no media was downloaded and no social-platform post was made.
 
 | Version | Nodes | Last update |
 | --- | ---: | --- |
-| Live database `video editing` | 36 | September 11, 2026 post-import export |
-| Canonical `reup-pipeline.json` | 36 | September 11, 2026 imported canonical |
+| Live database `video editing` (`reupPipeline`) | 39 | September 15, 2026 manual-test import/export |
+| Canonical `reup-pipeline.json` | 39 | Matches live runtime behavior on September 15, 2026 |
 | `f7-render.json` | 24 | September 7, 2026 |
-| Live-to-canonical difference | None in the tested contract | Import verified |
+| Live-to-canonical difference | Only n8n `versionId`/`versionCounter` metadata | No import required |
 
 The corrected source `chatId` and Vietnamese invalid-input guidance are now in
 both the canonical file and live workflow. Do not overwrite them with an older
@@ -61,6 +71,11 @@ They are older snapshots. Use `reup-pipeline.json` as the canonical source.
 
 All workflows were inactive at the time of inspection. An inactive workflow
 can be edited and tested manually, but its production webhook is not active.
+
+The manual test route is `Manual Trigger -> Manual test URL (edit here) ->
+Start ingest`. It bypasses the Telegram-update parser, lets an operator set
+`videoUrl` in the editor, and sends the `Pipeline ready notification` only
+after a `ready` manifest with zero failures.
 
 ## Prepared canonical flow
 

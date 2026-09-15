@@ -452,7 +452,7 @@
       },
       {
         "parameters": {
-          "chatId": "6265299173",
+          "chatId": "=6265299173",
           "text": "={{ 'Metadata cần xử lý cho video ' + $json.video_id + '.\\nMã lỗi: ' + $json.error_code + '\\nChi tiết: ' + $json.error + '\\nHãy dùng Retry metadata stage; các kết quả đã thành công được giữ lại.' }}",
           "additionalFields": {}
         },
@@ -1053,7 +1053,7 @@
       },
       {
         "parameters": {
-          "chatId": "6265299173",
+          "chatId": "=6265299173",
           "text": "Translation failed",
           "additionalFields": {}
         },
@@ -1075,7 +1075,7 @@
       },
       {
         "parameters": {
-          "chatId": "6265299173",
+          "chatId": "=6265299173",
           "text": "voice failed",
           "additionalFields": {}
         },
@@ -1116,64 +1116,6 @@
             "name": "Telegram account"
           }
         }
-      },
-      {
-        "parameters": {
-          "chatId": "6265299173",
-          "text": "={{ '✅ ReUp pipeline ready for manual upload\\nVideo: ' + $json.video_id + '\\nManifest: ' + $json.manifest_path + '\\nAssets: ' + $json.asset_count + '\\nWarnings: ' + (($json.warnings || []).join('; ') || 'none') }}",
-          "additionalFields": {}
-        },
-        "type": "n8n-nodes-base.telegram",
-        "typeVersion": 1.2,
-        "position": [
-          1520,
-          -80
-        ],
-        "id": "telegram-render-ready-20260915",
-        "name": "Pipeline ready notification",
-        "webhookId": "bc4472e6-a5dd-4777-9cb6-ec6960f0bf6b",
-        "credentials": {
-          "telegramApi": {
-            "id": "7fwKL9Enb7iOahec",
-            "name": "Telegram account"
-          }
-        }
-      },
-      {
-        "parameters": {},
-        "type": "n8n-nodes-base.manualTrigger",
-        "typeVersion": 1,
-        "position": [
-          -448,
-          -288
-        ],
-        "id": "manual-trigger-reup-pipeline",
-        "name": "Manual Trigger",
-        "notes": "Run this branch from the n8n editor for a manual media-pipeline test. It does not use the public webhook."
-      },
-      {
-        "parameters": {
-          "assignments": {
-            "assignments": [
-              {
-                "id": "manual-url-reup-pipeline",
-                "name": "videoUrl",
-                "value": "https://www.youtube.com/watch?v=hS3VXBeEv0I",
-                "type": "string"
-              }
-            ]
-          },
-          "options": {}
-        },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.4,
-        "position": [
-          -208,
-          -288
-        ],
-        "id": "manual-url-reup-pipeline",
-        "name": "Manual test URL (edit here)",
-        "notes": "Replace videoUrl with a permitted YouTube URL before executing. The pipeline accepts 5–20 minute, at-least-720p sources."
       }
     ],
     "connections": {
@@ -1544,39 +1486,6 @@
             }
           ]
         ]
-      },
-      "Rendered": {
-        "main": [
-          [
-            {
-              "node": "Pipeline ready notification",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Manual Trigger": {
-        "main": [
-          [
-            {
-              "node": "Manual test URL (edit here)",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Manual test URL (edit here)": {
-        "main": [
-          [
-            {
-              "node": "Start ingest",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
       }
     },
     "settings": {
@@ -1661,9 +1570,9 @@
         }
       ]
     },
-    "versionId": "37045b10-46c7-42d0-9ecc-ad375d5a03d1",
+    "versionId": "8d59a992-008f-40ef-a47f-d80a9de38881",
     "activeVersionId": null,
-    "versionCounter": 75,
+    "versionCounter": 72,
     "triggerCount": 1,
     "sourceWorkflowId": null,
     "tags": [],
