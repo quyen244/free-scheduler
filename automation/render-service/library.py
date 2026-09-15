@@ -21,6 +21,7 @@ RAW_NAME = "raw.mp4"
 PRESETS_DIR = "presets"
 BACKGROUNDS_DIR = "backgrounds"
 BRANDS_DIR = "brands"
+BRAND_ASSETS_DIR = "brand-assets"
 MUSIC_DIR = "music"
 
 _VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -159,5 +160,24 @@ def music_path(file_name: str) -> Path:
     if not path.is_file():
         raise PresetNotFoundError(
             f"signature music is missing at {path}; add the configured file and retry"
+        )
+    return path
+
+
+def brand_asset_path(brand_id: str, file_name: str) -> Path:
+    """Resolve a brand-owned image below ``data/presets/brand-assets/<brand_id>``.
+
+    Each brand gets its own directory so one brand config can never name
+    another brand file, and a logo cannot be read from an arbitrary local path
+    just because the JSON asked for it.
+    """
+    if not _PRESET_PATTERN.fullmatch(brand_id):
+        raise PresetNotFoundError(f"not a valid brand id: {brand_id!r}")
+    if not _ASSET_FILE_PATTERN.fullmatch(file_name):
+        raise PresetNotFoundError(f"not a valid brand asset name: {file_name!r}")
+    path = presets_dir() / BRAND_ASSETS_DIR / brand_id / file_name
+    if not path.is_file():
+        raise PresetNotFoundError(
+            f"brand asset is missing at {path}; add the configured file and retry"
         )
     return path

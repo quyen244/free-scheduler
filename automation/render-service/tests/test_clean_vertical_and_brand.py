@@ -83,6 +83,10 @@ def _build_inputs(root: Path) -> None:
         "/data/presets/brands/mock-brand.json",
         root / "presets" / "brands" / "mock-brand.json",
     )
+    shutil.copytree(
+        "/data/presets/brand-assets",
+        root / "presets" / "brand-assets",
+    )
     (root / "music").mkdir()
     subprocess.run(
         [
@@ -177,7 +181,7 @@ def _frame(path: Path) -> np.ndarray:
     return np.frombuffer(result.stdout, dtype=np.uint8).reshape(1920, 1080)
 
 
-def test_clean_part_then_mock_brand_adds_watermark_and_music(tmp_path, monkeypatch):
+def test_clean_part_then_mock_brand_adds_brand_images_and_music(tmp_path, monkeypatch):
     _build_inputs(tmp_path)
     monkeypatch.setattr(library, "settings", SimpleNamespace(data_dir=tmp_path))
     monkeypatch.setattr(render, "encoder", lambda: "libx264")
@@ -198,7 +202,15 @@ def test_clean_part_then_mock_brand_adds_watermark_and_music(tmp_path, monkeypat
         texts={"caption_top": "Bạn có nhận ra?", "caption_bottom": "Phần 1"},
     )
     profile = brand.load("mock-brand")
-    branded = render.render_branded_variant(clean, profile)
+    # The rectangles a published visual preset reserves for this brand.
+    branded = render.render_branded_variant(
+        clean,
+        profile,
+        brand_slots={
+            "logo": {"x": 0.04, "y": 0.04, "w": 0.16, "h": 0.10},
+            "watermark": {"x": 0.79, "y": 0.04, "w": 0.16, "h": 0.10},
+        },
+    )
 
     assert Path(clean.path) == (
         tmp_path
@@ -227,6 +239,8 @@ def test_clean_part_then_mock_brand_adds_watermark_and_music(tmp_path, monkeypat
     )
     top_right = difference[:180, 650:]
     assert int((top_right > 20).sum()) > 100
+    top_left = difference[:180, :400]
+    assert int((top_left > 20).sum()) > 100
 
 
 def test_signature_music_ducks_loops_and_fades_without_lowering_speech(
@@ -311,7 +325,7 @@ def test_clean_vertical_rejects_brand_fields(tmp_path, monkeypatch):
     _build_inputs(tmp_path)
     monkeypatch.setattr(library, "settings", SimpleNamespace(data_dir=tmp_path))
     preset = _preset("vertical-clean")
-    preset["watermark"] = {"text": "brand"}
+    preset["watermark"] = {"x": 0.8, "y": 0.04, "w": 0.16, "h": 0.1}
     with pytest.raises(RenderError, match="cannot contain brand"):
         render.render_clean_vertical(
             VIDEO_ID,
@@ -444,11 +458,11 @@ def test_corrupt_brand_asset_retry_reuses_verified_peers(tmp_path, monkeypatch):
         calls["clean_vertical"] += 1
         return original_vertical(*args, **kwargs)
 
-    def corrupt_once(clean_asset, profile, warnings=None):
+    def corrupt_once(clean_asset, profile, brand_slots=None, warnings=None):
         nonlocal corrupted_once
         item = clean_asset.content_item_id
         calls["branded"][item] = calls["branded"].get(item, 0) + 1
-        outcome = original_branded(clean_asset, profile, warnings)
+        outcome = original_branded(clean_asset, profile, brand_slots, warnings)
         if item == "part_2" and not corrupted_once:
             corrupted_once = True
             Path(outcome.path).write_bytes(b"corrupt")
@@ -534,9 +548,13 @@ def test_two_brands_keep_separate_paths_and_signature_music(tmp_path, monkeypatc
             encoding="utf-8"
         )
     )
+    shutil.copytree(
+        tmp_path / "presets" / "brand-assets" / "mock-brand",
+        tmp_path / "presets" / "brand-assets" / "second-brand",
+    )
     second_profile["brand_id"] = "second-brand"
     second_profile["display_name"] = "Second Brand"
-    second_profile["watermark"]["text"] = "SECOND MOCK"
+    second_profile["watermark"]["opacity"] = 0.5
     second_profile["signature_music"]["file"] = second_music.name
     (tmp_path / "presets" / "brands" / "second-brand.json").write_text(
         json.dumps(second_profile, ensure_ascii=False), encoding="utf-8"

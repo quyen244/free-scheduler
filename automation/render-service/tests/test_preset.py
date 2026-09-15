@@ -9,6 +9,10 @@ import pytest
 
 import preset as presets
 
+# Pure arithmetic, as the docstring says: no ingested video, no sibling
+# service. Without the marker these tests wait on a download they never use.
+pytestmark = pytest.mark.no_pipeline
+
 PRESET = {
     "canvas": {"w": 1080, "h": 1920},
     "video_rect": {"x": 0.0, "y": 0.28, "w": 1.0, "h": 0.44},
@@ -75,3 +79,28 @@ def test_a_preset_with_no_logo_resolves_without_one():
 def test_the_font_family_resolves_to_a_file_that_exists():
     path = presets.font_file("DejaVu Sans")
     assert path.endswith(".ttf") or path.endswith(".otf")
+
+
+def test_a_full_bleed_layer_starts_at_zero_rather_than_two():
+    """A position is not a size, and zero is a legal offset.
+
+    Rounding a position up to 2 the way a dimension has to be rounded shifts a
+    full-bleed video two pixels right and down: two pixels of the picture are
+    cropped away on one edge and two pixels of background leak in on the other.
+    It is small, and it is exactly the kind of drift that makes the editor
+    preview and the render disagree about where a layer sits.
+    """
+    full_bleed = {
+        "canvas": {"w": 1920, "h": 1080},
+        "video_rect": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
+        "blur_regions": [{"x": 0.0, "y": 0.0, "w": 0.2, "h": 0.2}],
+        "logo": {"path": "logo.png", "x": 0.0, "y": 0.0, "w": 0.1},
+    }
+    geometry = presets.resolve(full_bleed, 1280, 720)
+
+    assert (geometry.video.x, geometry.video.y) == (0, 0)
+    assert (geometry.video.w, geometry.video.h) == (1920, 1080)
+    assert (geometry.blur_regions[0].x, geometry.blur_regions[0].y) == (0, 0)
+    assert (geometry.logo.x, geometry.logo.y) == (0, 0)
+    # Sizes keep their floor: a zero-wide stream is not a thing ffmpeg accepts.
+    assert geometry.blur_regions[0].w >= 2 and geometry.blur_regions[0].h >= 2

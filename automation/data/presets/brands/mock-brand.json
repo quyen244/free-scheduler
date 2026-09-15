@@ -1,13 +1,13 @@
 {
-  "schema_version": "mock-brand.v1",
+  "schema_version": "mock-brand.v2",
   "brand_id": "mock-brand",
   "display_name": "Mystery VN (Mock)",
+  "logo": {
+    "file": "logo.png",
+    "opacity": 1.0
+  },
   "watermark": {
-    "text": "MYSTERY VN • MOCK",
-    "anchor": "top_right",
-    "margin_ratio": 0.035,
-    "font_size_ratio": 0.028,
-    "color": "#D4AF37",
+    "file": "watermark.png",
     "opacity": 0.72
   },
   "signature_music": {

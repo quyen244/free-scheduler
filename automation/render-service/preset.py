@@ -18,6 +18,15 @@ def _even(value: float) -> int:
     return max(int(round(value / 2.0)) * 2, 2)
 
 
+# A position is not a size. Zero is a legal offset and is exactly what a
+# full-bleed layout asks for, so clamping it to 2 like a dimension pushes the
+# layer off by two pixels: on a 1920-wide video in a 1920 canvas that crops two
+# pixels from the right and leaks background in on the left. Still rounded to
+# even, because crop and overlay offsets on yuv420p must be.
+def _even_pos(value: float) -> int:
+    return max(int(round(value / 2.0)) * 2, 0)
+
+
 @dataclass(frozen=True)
 class Box:
     x: int
@@ -54,14 +63,14 @@ def resolve(preset: dict, source_w: int, source_h: int) -> Geometry:
     scale = min(slot_w / source_w, slot_h / source_h)
     video_w = _even(source_w * scale)
     video_h = _even(source_h * scale)
-    video_x = _even(canvas_w * float(rect["x"]) + (slot_w - video_w) / 2)
-    video_y = _even(canvas_h * float(rect["y"]) + (slot_h - video_h) / 2)
+    video_x = _even_pos(canvas_w * float(rect["x"]) + (slot_w - video_w) / 2)
+    video_y = _even_pos(canvas_h * float(rect["y"]) + (slot_h - video_h) / 2)
 
     blur_regions = clamp_regions(
         [
             Box(
-                x=_even(source_w * float(region["x"])),
-                y=_even(source_h * float(region["y"])),
+                x=_even_pos(source_w * float(region["x"])),
+                y=_even_pos(source_h * float(region["y"])),
                 w=_even(source_w * float(region["w"])),
                 h=_even(source_h * float(region["h"])),
             )
@@ -77,8 +86,8 @@ def resolve(preset: dict, source_w: int, source_h: int) -> Geometry:
     if logo:
         logo_w = _even(canvas_w * float(logo["w"]))
         logo_box = Box(
-            x=_even(canvas_w * float(logo["x"])),
-            y=_even(canvas_h * float(logo["y"])),
+            x=_even_pos(canvas_w * float(logo["x"])),
+            y=_even_pos(canvas_h * float(logo["y"])),
             w=logo_w,
             # -1 keeps the logo's own aspect ratio; ffmpeg fills it in.
             h=-1,

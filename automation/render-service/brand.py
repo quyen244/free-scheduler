@@ -22,13 +22,16 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class Watermark(StrictModel):
-    text: str = Field(min_length=1, max_length=80)
-    anchor: Literal["top_left", "top_right", "bottom_left", "bottom_right"]
-    margin_ratio: float = Field(ge=0.01, le=0.2)
-    font_size_ratio: float = Field(ge=0.01, le=0.08)
-    color: str = Field(pattern=r"^#[A-Fa-f0-9]{6}$")
-    opacity: float = Field(gt=0, le=1)
+class BrandImage(StrictModel):
+    """One brand-owned image, placed by whichever preset happens to use it.
+
+    The file belongs to the brand; the rectangle it lands in belongs to the
+    visual preset.  Keeping the split this way means one published layout can
+    dress every brand without a copy of the artwork per layout.
+    """
+
+    file: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    opacity: float = Field(default=1.0, gt=0, le=1)
 
 
 class SpeechDucking(StrictModel):
@@ -49,10 +52,11 @@ class SignatureMusic(StrictModel):
 
 
 class MockBrandProfile(StrictModel):
-    schema_version: Literal["mock-brand.v1"] = "mock-brand.v1"
+    schema_version: Literal["mock-brand.v2"] = "mock-brand.v2"
     brand_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
     display_name: str = Field(min_length=1, max_length=100)
-    watermark: Watermark
+    logo: BrandImage | None = None
+    watermark: BrandImage | None = None
     signature_music: SignatureMusic
 
     @model_validator(mode="after")
@@ -73,11 +77,18 @@ def load(brand_id: str) -> MockBrandProfile:
         raise BrandConfigError(
             f"brand config {path.name} declares {profile.brand_id!r}, expected {brand_id!r}"
         )
-    # Resolve eagerly. A missing music file is a user-fixable configuration
-    # error and should happen before minutes of video encoding are spent.
+    # Resolve eagerly. A missing file is a user-fixable configuration error
+    # and should surface before minutes of video encoding are spent.
     library.music_path(profile.signature_music.file)
+    for image in (profile.logo, profile.watermark):
+        if image is not None:
+            library.brand_asset_path(profile.brand_id, image.file)
     return profile
 
 
 def music_path(profile: MockBrandProfile) -> Path:
     return library.music_path(profile.signature_music.file)
+
+
+def image_path(profile: MockBrandProfile, image: BrandImage) -> Path:
+    return library.brand_asset_path(profile.brand_id, image.file)

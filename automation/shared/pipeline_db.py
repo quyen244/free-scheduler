@@ -561,3 +561,12 @@ def get_job(job_id: str) -> dict[str, object] | None:
     job["result"] = json.loads(job["result"]) if job["result"] else None
     job["warnings"] = json.loads(job["warnings"]) if job["warnings"] else None
     return job
+
+
+def title_for(video_id: str) -> str:
+    """The ingested source title, for presets that bind a text layer to it."""
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT title FROM videos WHERE video_id = ?", (video_id,)
+        ).fetchone()
+    return str(row["title"]) if row and row["title"] else ""

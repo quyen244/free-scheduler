@@ -113,6 +113,11 @@ def render_media_revision(
     segments = transcript.get("segments") or []
     voice_manifest = library.load_voice_manifest(video_id) or {}
     source = render.probe(library.raw_path(video_id))
+    # Values a preset text layer can bind to. A layer bound to a field that is
+    # empty is skipped and reported, never filled with its editor preview text.
+    from shared import pipeline_db
+
+    fields = {"title": pipeline_db.title_for(video_id)}
 
     total_assets = (1 + len(chunks)) * (1 + len(profiles))
     completed = 0
@@ -138,6 +143,7 @@ def render_media_revision(
                 render_revision,
                 landscape_preset,
                 segments,
+                fields=fields,
                 warnings=list(voice_manifest.get("warnings") or []),
             ),
         )
@@ -176,6 +182,7 @@ def render_media_revision(
                         "caption_top": str(chunk.get("hook") or ""),
                         "caption_bottom": str(chunk.get("caption") or ""),
                     },
+                    fields=fields,
                     warnings=list(voice_manifest.get("warnings") or []),
                 ),
             )
@@ -231,8 +238,12 @@ def render_media_revision(
                     expected_duration_s=clean.probe.duration_s,
                     brand_id=profile.brand_id,
                     lineage_asset_id=clean.asset_id,
-                    build=lambda clean=clean, profile=profile: render.render_branded_variant(
-                        clean, profile
+                    build=lambda clean=clean, profile=profile, role=role: render.render_branded_variant(
+                        clean,
+                        profile,
+                        brand_slots=(
+                            landscape_preset if role == "branded_whole" else vertical_preset
+                        ).get("brand_slots"),
                     ),
                 )
                 assets.append(branded)

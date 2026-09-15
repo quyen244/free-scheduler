@@ -19,6 +19,7 @@ from pathlib import Path
 import library
 import manifest as manifests
 import preset as presets
+import visual_preset
 import brand as brands
 import subs
 from errors import RenderError
@@ -253,6 +254,249 @@ def _write_text(directory: Path, name: str, text: str) -> str:
     return name
 
 
+# Input slots shared by every clean render. The source, the background still
+# and the Vietnamese voice are always present, so their indices are fixed and
+# anything optional is appended after them.
+_BACKGROUND_INPUT = 1
+_VOICE_INPUT = 2
+_FIRST_OPTIONAL_INPUT = 3
+
+
+def _background_args(
+    preset: dict, geometry: presets.Geometry, duration_s: float
+) -> list[str]:
+    """Input 1: the still behind everything, or a black canvas when unset.
+
+    A generated black frame rather than no input at all, so the index of every
+    later input stays the same whether or not the preset carries a background.
+    """
+    name = str(preset.get("background") or "")
+    if not name:
+        return [
+            "-f", "lavfi",
+            "-t", f"{duration_s:.3f}",
+            "-i", f"color=c=black:s={geometry.canvas_w}x{geometry.canvas_h}:r=30",
+        ]
+    return [
+        "-loop", "1",
+        "-t", f"{duration_s:.3f}",
+        "-i", str(library.background_path(name)),
+    ]
+
+
+def _canvas_box(rect: dict, canvas_w: int, canvas_h: int) -> presets.Box:
+    """A normalised rectangle in canvas pixels, kept even for yuv420p."""
+    return presets.Box(
+        x=int(round(canvas_w * float(rect.get("x", 0.0)))),
+        y=int(round(canvas_h * float(rect.get("y", 0.0)))),
+        w=max(int(round(canvas_w * float(rect.get("w", 1.0)))) // 2 * 2, 2),
+        h=max(int(round(canvas_h * float(rect.get("h", 1.0)))) // 2 * 2, 2),
+    )
+
+
+def _text_step(
+    layer: dict,
+    value: str,
+    geometry: presets.Geometry,
+    directory: Path,
+    prefix: str,
+    family: str,
+) -> str:
+    """One text layer, wrapped and aligned inside its own rectangle.
+
+    drawtext has no word wrap, so a long title would run straight off the
+    canvas. Wrapping happens here, through the same function the subtitles
+    use, and the result is written to a file rather than inlined: these
+    strings are Vietnamese, and a colon or an apostrophe inside a filtergraph
+    is a parse error rather than a character.
+    """
+    max_lines = max(int(layer.get("max_lines", 3)), 1)
+    lines = subs.wrap(value, max(int(layer.get("max_chars_per_line", 28)), 6))[:max_lines]
+    layer_id = str(layer.get("id", "text"))
+    textfile = _write_text(
+        directory, f"{prefix}.text-{layer_id}.txt", "\n".join(lines)
+    )
+
+    size = max(int(layer.get("size", 48)), 8)
+    colour = str(layer.get("color", "#FFFFFF")).lstrip("#")
+    left = int(round(geometry.canvas_w * float(layer.get("x", 0.0))))
+    width = int(round(geometry.canvas_w * float(layer.get("w", 1.0))))
+    top = int(round(geometry.canvas_h * float(layer.get("y", 0.0))))
+    align = str(layer.get("align", "center"))
+    if align == "left":
+        x = str(left)
+    elif align == "right":
+        x = f"{left + width}-text_w"
+    else:
+        x = f"{left}+({width}-text_w)/2"
+    spacing = max(int(round(size * (float(layer.get("line_spacing", 1.15)) - 1.0))), 0)
+    return (
+        f"drawtext=fontfile={presets.font_file(family)}:textfile={textfile}"
+        f":fontsize={size}:fontcolor=0x{colour}:line_spacing={spacing}"
+        f":borderw={max(size // 16, 1)}:bordercolor=0x000000"
+        f":x={x}:y={top}"
+    )
+
+
+def _host_layer(
+    host: dict, geometry: presets.Geometry, duration_s: float, first_input: int
+) -> tuple[list[str], list[str], str]:
+    """The matted presenter: its own video plus the RVM alpha, merged.
+
+    The alpha revision is required rather than optional. Without it the host
+    composites as an opaque rectangle sitting on the layout, which is not a
+    slightly worse render but an obviously broken one, and refusing here is
+    cheaper than discovering it in a published video.
+    """
+    revision = str(host.get("alpha_revision") or "")
+    if not revision:
+        raise RenderError(
+            "the preset places a host but carries no RVM alpha revision; "
+            "run matting and publish a new revision before rendering"
+        )
+    alpha = visual_preset.alpha_mask_path(str(host["preset_id"]), revision)
+    if not alpha.is_file():
+        raise RenderError(f"host alpha mask is missing at {alpha}")
+
+    video_index, alpha_index = first_input, first_input + 1
+    box = _canvas_box(host.get("rect") or {}, geometry.canvas_w, geometry.canvas_h)
+    args = [
+        # Looped, so a host shorter than the chunk keeps presenting instead of
+        # freezing on its last frame for the remainder.
+        "-stream_loop", "-1", "-t", f"{duration_s:.3f}",
+        "-i", str(library.asset_path(str(host["asset"]))),
+        "-stream_loop", "-1", "-t", f"{duration_s:.3f}",
+        "-i", str(alpha),
+    ]
+    steps = [
+        f"[{video_index}:v]scale={box.w}:{box.h},setsar=1,format=gbrp[hostrgb]",
+        f"[{alpha_index}:v]scale={box.w}:{box.h},setsar=1,format=gray[hostalpha]",
+        "[hostrgb][hostalpha]alphamerge[hostrgba]",
+    ]
+    return args, steps, f"overlay={box.x}:{box.y}:eof_action=pass"
+
+
+def compose_clean(
+    preset: dict,
+    geometry: presets.Geometry,
+    source: Source,
+    directory: Path,
+    prefix: str,
+    subtitle_name: str,
+    duration_s: float,
+    fields: dict[str, str] | None = None,
+    texts: dict[str, str] | None = None,
+) -> tuple[str, list[str], list[str]]:
+    """Build the brand-neutral half of a render.
+
+    Returns the video filtergraph, the extra ffmpeg inputs it needs after the
+    fixed three, and any warnings worth recording on the asset. Layers are
+    emitted in ascending `z` so that the stacking order shown in the editor and
+    the order ffmpeg composites in are the same fact rather than two
+    descriptions that can disagree.
+    """
+    fields = fields or {}
+    warnings: list[str] = []
+    steps, video_label = _blur_chain(geometry.blur_regions, source)
+    family = str((preset.get("subtitle") or {}).get("font", "DejaVu Sans"))
+
+    video = geometry.video
+    steps.append(f"[{video_label}]scale={video.w}:{video.h},setsar=1[vid]")
+    steps.append(
+        f"[{_BACKGROUND_INPUT}:v]scale={geometry.canvas_w}:{geometry.canvas_h},setsar=1[bg]"
+    )
+
+    extra_inputs: list[str] = []
+    # (z, sequence, label stem, filter applied to the running composite)
+    layers: list[tuple[int, int, str, str]] = []
+    sequence = 0
+
+    if preset.get("video_visible", True):
+        layers.append(
+            (
+                int(preset.get("video_z", 10)),
+                sequence,
+                "main",
+                f"[vid]overlay={video.x}:{video.y}",
+            )
+        )
+    sequence += 1
+
+    host = preset.get("host")
+    if host and host.get("asset"):
+        first_input = _FIRST_OPTIONAL_INPUT + extra_inputs.count("-i")
+        args, host_steps, overlay = _host_layer(host, geometry, duration_s, first_input)
+        extra_inputs.extend(args)
+        steps.extend(host_steps)
+        layers.append((int(host.get("z", 20)), sequence, "host", f"[hostrgba]{overlay}"))
+    sequence += 1
+
+    for layer in preset.get("text_layers") or []:
+        binding = str(layer.get("source", "static"))
+        value = (
+            str(layer.get("text") or "")
+            if binding == "static"
+            else str(fields.get(binding) or "")
+        ).strip()
+        if not value:
+            # A bound field with nothing behind it is reported rather than
+            # quietly replaced by the editor preview string, which would put
+            # placeholder text into a delivery asset.
+            if binding != "static":
+                warnings.append(
+                    f"text layer {layer.get('id')!r} is bound to {binding!r} "
+                    f"and was skipped because that field is empty"
+                )
+            continue
+        layers.append(
+            (
+                int(layer.get("z", 50)),
+                sequence,
+                f"text{sequence}",
+                _text_step(layer, value, geometry, directory, prefix, family),
+            )
+        )
+        sequence += 1
+
+    # The per-chunk hook and caption boxes of the pre-editor presets. They stay
+    # supported so a job that names no editor preset still renders.
+    for key in ("caption_top", "caption_bottom"):
+        config = preset.get(key)
+        value = str((texts or {}).get(key, "")).strip()
+        if not config or not value:
+            continue
+        textfile = _write_text(directory, f"{prefix}.{key}.txt", value)
+        layers.append(
+            (
+                int(config.get("z", 50)),
+                sequence,
+                key,
+                _drawtext(config, textfile, geometry, family),
+            )
+        )
+        sequence += 1
+
+    subtitle = preset.get("subtitle") or {}
+    if subtitle.get("visible", True):
+        layers.append(
+            (int(subtitle.get("z", 60)), sequence, "subs", f"ass={subtitle_name}")
+        )
+
+    current = "bg"
+    for _, _, stem, expression in sorted(layers, key=lambda item: (item[0], item[1])):
+        nxt = f"{stem}_out"
+        steps.append(f"[{current}]{expression}[{nxt}]")
+        current = nxt
+    if current == "bg":
+        # Drawing nothing at all is a configuration mistake rather than a
+        # crash, but the graph still has to produce a stream to map.
+        steps.append("[bg]null[vout]")
+        warnings.append("preset draws no visible layer over its background")
+    else:
+        steps[-1] = steps[-1].rsplit("[", 1)[0] + "[vout]"
+    return ";".join(steps), extra_inputs, warnings
+
+
 def build_filtergraph(
     preset: dict,
     geometry: presets.Geometry,
@@ -382,6 +626,7 @@ def render_clean_whole(
     render_revision: int,
     preset: dict,
     segments: list[dict],
+    fields: dict[str, str] | None = None,
     warnings: list[str] | None = None,
 ) -> manifests.MediaAsset:
     """Render the complete source directly to the clean YouTube asset.
@@ -414,12 +659,20 @@ def render_clean_whole(
         ),
     )
 
-    partial = output.with_name("whole-16x9.part.mp4")
-    filtergraph = (
-        "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,"
-        "setsar=1,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"ass={subtitle_name}[vout];[1:a]apad[aout]"
+    geometry = presets.resolve(preset, source.width, source.height)
+    video_graph, extra_inputs, composed_warnings = compose_clean(
+        preset,
+        geometry,
+        source,
+        output.parent,
+        "whole-16x9",
+        subtitle_name,
+        source.duration_s,
+        fields=fields,
     )
+    filtergraph = f"{video_graph};[{_VOICE_INPUT}:a]apad[aout]"
+
+    partial = output.with_name("whole-16x9.part.mp4")
     command = [
         "ffmpeg",
         "-y",
@@ -427,8 +680,10 @@ def render_clean_whole(
         "error",
         "-i",
         str(raw),
+        *_background_args(preset, geometry, source.duration_s),
         "-i",
         str(voice),
+        *extra_inputs,
         "-filter_complex",
         filtergraph,
         "-map",
@@ -470,7 +725,7 @@ def render_clean_whole(
         "clean_whole",
         manifests.WHOLE_ITEM,
         expected_duration_s=source.duration_s,
-        warnings=warnings,
+        warnings=[*(warnings or []), *composed_warnings],
     )
 
 
@@ -481,13 +736,17 @@ def render_clean_vertical(
     preset: dict,
     segments: list[dict],
     texts: dict[str, str] | None = None,
+    fields: dict[str, str] | None = None,
     warnings: list[str] | None = None,
 ) -> manifests.MediaAsset:
     """Render one brand-neutral, revisioned 1080x1920 chunk master."""
     canvas = preset.get("canvas") or {}
     if (int(canvas.get("w", 0)), int(canvas.get("h", 0))) != (1080, 1920):
         raise RenderError("clean vertical preset must use a 1080x1920 canvas")
-    if preset.get("logo") or (preset.get("watermark") or {}).get("text"):
+    # A clean master is shared by every brand, so no brand file may reach it.
+    # The preset still carries the logo and watermark rectangles; those are
+    # geometry, and the branded stage is where a brand file lands in them.
+    if preset.get("logo") or preset.get("watermark"):
         raise RenderError("clean vertical preset cannot contain brand logo or watermark")
 
     idx = int(chunk["idx"])
@@ -526,28 +785,19 @@ def render_clean_vertical(
         ),
     )
 
-    steps, video_label = _blur_chain(geometry.blur_regions, source)
-    box = geometry.video
-    steps.extend(
-        [
-            f"[{video_label}]scale={box.w}:{box.h},setsar=1[vid]",
-            f"[1:v]scale={geometry.canvas_w}:{geometry.canvas_h},setsar=1[bg]",
-            f"[bg][vid]overlay={box.x}:{box.y}[comp]",
-        ]
+    video_graph, extra_inputs, composed_warnings = compose_clean(
+        preset,
+        geometry,
+        source,
+        output.parent,
+        content_item_id,
+        subtitle_name,
+        duration_s,
+        # `part` needs no metadata lookup: a chunk knows which part it is.
+        fields={"part": str(idx + 1), **(fields or {})},
+        texts=texts,
     )
-    current = "comp"
-    family = str((preset.get("subtitle") or {}).get("font", "DejaVu Sans"))
-    for key in ("caption_top", "caption_bottom"):
-        value = str((texts or {}).get(key, "")).strip()
-        config = preset.get(key)
-        if not config or not value:
-            continue
-        textfile = _write_text(output.parent, f"{content_item_id}.{key}.txt", value)
-        nxt = f"{key}_out"
-        steps.append(f"[{current}]{_drawtext(config, textfile, geometry, family)}[{nxt}]")
-        current = nxt
-    steps.append(f"[{current}]ass={subtitle_name}[vout]")
-    steps.append("[2:a]apad[aout]")
+    filtergraph = f"{video_graph};[{_VOICE_INPUT}:a]apad[aout]"
 
     partial = output.with_name(f"{content_item_id}-9x16.part.mp4")
     command = [
@@ -561,20 +811,16 @@ def render_clean_vertical(
         f"{duration_s:.3f}",
         "-i",
         str(raw),
-        "-loop",
-        "1",
-        "-t",
-        f"{duration_s:.3f}",
-        "-i",
-        str(library.background_path(str(preset.get("background", "")))),
+        *_background_args(preset, geometry, duration_s),
         "-ss",
         f"{start_s:.3f}",
         "-t",
         f"{duration_s:.3f}",
         "-i",
         str(voice),
+        *extra_inputs,
         "-filter_complex",
-        ";".join(steps),
+        filtergraph,
         "-map",
         "[vout]",
         "-map",
@@ -614,16 +860,53 @@ def render_clean_vertical(
         "clean_vertical",
         content_item_id,
         expected_duration_s=duration_s,
-        warnings=warnings,
+        warnings=[*(warnings or []), *composed_warnings],
     )
+
+
+def _brand_overlay(
+    profile: brands.MockBrandProfile,
+    slot_name: str,
+    slots: dict,
+    canvas_w: int,
+    canvas_h: int,
+    input_index: int,
+) -> tuple[list[str], list[str], str] | None:
+    """One brand image placed in the rectangle the preset reserved for it.
+
+    Both halves have to be present. A brand with no logo file has nothing to
+    draw, and a preset with no logo slot has nowhere to draw it; in either case
+    the correct result is an unbranded-in-that-respect video rather than a
+    guessed placement.
+    """
+    image: brands.BrandImage | None = getattr(profile, slot_name, None)
+    slot = (slots or {}).get(slot_name)
+    if image is None or not slot or not slot.get("visible", True):
+        return None
+    box = _canvas_box(slot, canvas_w, canvas_h)
+    args = ["-i", str(brands.image_path(profile, image))]
+    label = f"{slot_name}img"
+    steps = [
+        # -1 preserves the artwork aspect ratio: the slot width is the layout
+        # decision, and stretching a logo to an arbitrary height is the kind of
+        # thing a brand owner notices immediately.
+        f"[{input_index}:v]scale={box.w}:-1,format=rgba,"
+        f"colorchannelmixer=aa={image.opacity}[{label}]"
+    ]
+    return args, steps, f"[{label}]overlay={box.x}:{box.y}"
 
 
 def render_branded_variant(
     clean_asset: manifests.MediaAsset,
     profile: brands.MockBrandProfile,
+    brand_slots: dict | None = None,
     warnings: list[str] | None = None,
 ) -> manifests.MediaAsset:
     """Derive one brand-specific video from a validated clean master.
+
+    This is the only stage that reads a brand file. The clean master stays
+    brand-neutral so a single render can be dressed for several brands, and
+    `brand_slots` carries the rectangles the visual preset reserved.
 
     The mock music settings are a quiet, looped bed with short fades. The clean
     narration is also used as the sidechain so music falls during speech and
@@ -651,29 +934,48 @@ def render_branded_variant(
 
     music = brands.music_path(profile)
     duration_s = clean_asset.probe.duration_s
-    watermark = profile.watermark
-    min_dimension = min(clean_asset.probe.width, clean_asset.probe.height)
-    margin = max(int(round(min_dimension * watermark.margin_ratio)), 2)
-    font_size = max(int(round(min_dimension * watermark.font_size_ratio)), 12)
-    x = str(margin) if watermark.anchor.endswith("left") else f"w-text_w-{margin}"
-    y = str(margin) if watermark.anchor.startswith("top") else f"h-text_h-{margin}"
-    watermark_file = _write_text(
-        output.parent,
-        f"{clean_asset.content_item_id}.watermark.txt",
-        watermark.text,
-    )
 
     fade_in = min(profile.signature_music.fade_in_s, duration_s / 2)
     fade_out = min(profile.signature_music.fade_out_s, duration_s / 2)
     fade_out_start = max(duration_s - fade_out, 0)
     ducking = profile.signature_music.ducking
-    colour = watermark.color.lstrip("#")
-    font = presets.font_file("DejaVu Sans")
+
+    # Input 0 is the clean master and input 1 is the music bed, so brand images
+    # start at 2.
+    brand_inputs: list[str] = []
+    brand_steps: list[str] = []
+    overlays: list[str] = []
+    brand_warnings: list[str] = []
+    for slot_name in ("logo", "watermark"):
+        placed = _brand_overlay(
+            profile,
+            slot_name,
+            brand_slots or {},
+            clean_asset.probe.width,
+            clean_asset.probe.height,
+            2 + brand_inputs.count("-i"),
+        )
+        if placed is None:
+            brand_warnings.append(
+                f"{profile.brand_id} has no {slot_name} to place, or the preset "
+                f"reserves no {slot_name} slot; none was drawn"
+            )
+            continue
+        args, steps, overlay = placed
+        brand_inputs.extend(args)
+        brand_steps.extend(steps)
+        overlays.append(overlay)
+
+    current = "0:v"
+    for index, overlay in enumerate(overlays):
+        nxt = "vout" if index == len(overlays) - 1 else f"brand{index}"
+        brand_steps.append(f"[{current}]{overlay}[{nxt}]")
+        current = nxt
+    if not overlays:
+        brand_steps.append("[0:v]null[vout]")
+
     filtergraph = (
-        f"[0:v]drawtext=fontfile={font}:textfile={watermark_file}:"
-        f"fontsize={font_size}:fontcolor=0x{colour}@{watermark.opacity}:"
-        f"borderw={max(font_size // 18, 1)}:bordercolor=0x000000@{watermark.opacity}:"
-        f"x={x}:y={y}[vout];"
+        ";".join(brand_steps) + ";"
         "[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
         "asetpts=PTS-STARTPTS,asplit=2[speech][sidechain];"
         f"[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
@@ -699,6 +1001,7 @@ def render_branded_variant(
         "-1",
         "-i",
         str(music),
+        *brand_inputs,
         "-filter_complex",
         filtergraph,
         "-map",
@@ -734,7 +1037,7 @@ def render_branded_variant(
         ) from exc
 
     partial.replace(output)
-    combined_warnings = list(warnings or [])
+    combined_warnings = [*(warnings or []), *brand_warnings]
     return manifests.inspect_expected_asset(
         clean_asset.video_id,
         clean_asset.render_revision,
