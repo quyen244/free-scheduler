@@ -4,6 +4,19 @@ Turns a Whisper transcript into Vietnamese, one segment at a time, keeping the
 timings exactly. Runs `HY-MT1.5-1.8B` (Q4_K_M) on the CPU through
 `llama-cpp-python`.
 
+The service has one API and one job pipeline.  Model-specific prompt and
+decoding rules are injected as a `TRANSLATE_PROFILE`; adding a model does not
+add another translation backend or alter alignment, persistence, callbacks, or
+the n8n workflow.  The available profiles are:
+
+- `hunyuan-mt` — current production default.
+- `lmt-60` — NiuTrans LMT-60's minimal documented prompt.
+- `lmt-60-subtitle` — experimental length-constrained subtitle prompt.
+
+`LMT-60-0.6B Q4_K_M` was downloaded and GPU-benchmarked on September 15, 2026.
+It is fast but was not promoted: the 20-cue quality review found material
+proper-name and semantic errors. See [the benchmark report](../../reports/translate-lmt-0.6b-gpu-benchmark-2026-09-15.md).
+
 Called from n8n only when Whisper detected something other than `vi`. Sources
 here are English and Chinese, and this model translates both natively — no
 double hop through English.
@@ -72,6 +85,7 @@ layer.
 | Variable | Default | Purpose |
 |---|---|---|
 | `TRANSLATE_MODEL` | `models/HY-MT1.5-1.8B-Q4_K_M.gguf` | Path to the weights, relative to `/app`. |
+| `TRANSLATE_PROFILE` | `hunyuan-mt` | Injected model prompt/decoding profile. |
 | `DATA_DIR` | `/data` | The shared volume. |
 | `LLAMA_THREADS` | `0` (llama.cpp decides) | Generation threads. |
 | `LLAMA_CONTEXT` | `2048` | Context window. One segment at a time needs very little of it. |

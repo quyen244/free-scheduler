@@ -19,6 +19,7 @@ from errors import (
     TranslationError,
     TruncatedTranslationError,
 )
+from profiles import TranslationProfile, resolve_profile
 
 logger = logging.getLogger(__name__)
 
@@ -33,31 +34,6 @@ _lock = threading.RLock()
 
 TARGET_LANGUAGE = "vi"
 
-# The prompt shapes from the Hunyuan-MT model card. Chinese sources get the
-# Chinese template; everything else gets the English one.
-_ZH_PROMPT = "把下面的文本翻译成越南语，不要额外解释。\n\n{text}"
-_EN_PROMPT = (
-    "Translate the following segment into Vietnamese, without additional "
-    "explanation.\n\n{text}"
-)
-
-# The second pass. Used only on segments whose first translation is too long for
-# the time the source gives them, so the great majority of segments never see
-# this prompt and keep exactly what the single pass produced for them.
-_ZH_BUDGET_PROMPT = (
-    "把下面的文本翻译成越南语，不要额外解释。"
-    "译文必须简洁，不超过 {budget} 个字符，同时保留完整意思。\n\n{text}"
-)
-_EN_BUDGET_PROMPT = (
-    "Translate the following segment into Vietnamese, without additional "
-    "explanation. The translation must be concise and no longer than {budget} "
-    "characters, while keeping the full meaning.\n\n{text}"
-)
-
-# Sampling from the same model card. `_SEED` is applied on every call, not only
-# when the context is built - see `_translate_line` for why that distinction is
-# the difference between a reproducible pipeline and one that only looks it.
-_SAMPLING = {"temperature": 0.7, "top_p": 0.6, "top_k": 20, "repeat_penalty": 1.05}
 _SEED = 1337
 
 # Seeds for the budgeted retry, tried in order until one produces a shorter
@@ -105,6 +81,11 @@ def get_model():
 
 def is_loaded() -> bool:
     return _model is not None
+
+
+def get_profile() -> TranslationProfile:
+    """Inject the model profile at composition time from service settings."""
+    return resolve_profile(settings.profile)
 
 
 def _load_model():
@@ -182,15 +163,9 @@ def _translate_line(
     Raises `TruncatedTranslationError` when generation stopped at the token cap,
     because a subtitle cut off in the middle is worse than one that is rushed.
     """
-    chinese = source_language.startswith("zh")
-    if budget_chars is None:
-        template = _ZH_PROMPT if chinese else _EN_PROMPT
-        content = template.format(text=text)
-        cap = settings.max_output_tokens
-    else:
-        template = _ZH_BUDGET_PROMPT if chinese else _EN_BUDGET_PROMPT
-        content = template.format(text=text, budget=budget_chars)
-        cap = max_tokens or settings.max_output_tokens
+    profile = get_profile()
+    content = profile.prompt(text, source_language, TARGET_LANGUAGE, budget_chars)
+    cap = settings.max_output_tokens if budget_chars is None else max_tokens or settings.max_output_tokens
 
     # Seed every call, not just the constructor. llama.cpp seeds its RNG once at
     # construction and then lets it run, so without this a segment's translation
@@ -198,8 +173,7 @@ def _translate_line(
     # sentence translated twice in one process came back 99 and 95 characters
     # long. Seeded per call it is a function of its own text alone, which is
     # what makes a re-run reproducible and a before/after comparison honest.
-    sampling = dict(_SAMPLING)
-    sampling["seed"] = _SEED if seed is None else seed
+    sampling = profile.sampling(_SEED if seed is None else seed)
     try:
         with _lock:
             reply = get_model().create_chat_completion(
@@ -228,8 +202,28 @@ def _translate_line(
     return _clean(choice["message"]["content"] or "")
 
 
-def translate_lines(lines: Iterable[str], source_language: str) -> list[str]:
-    return [_translate_line(line, source_language) for line in lines]
+def translate_lines(
+    lines: Iterable[str], source_language: str, first_pass_budgets: Iterable[int | None] | None = None
+) -> list[str]:
+    """Translate one cue per call, optionally applying its timing budget first."""
+    items = list(lines)
+    if first_pass_budgets is None:
+        return [_translate_line(line, source_language) for line in items]
+
+    budgets = list(first_pass_budgets)
+    if len(budgets) != len(items):
+        raise ValueError("one first-pass budget is required for each source segment")
+    return [
+        _translate_line(
+            line,
+            source_language,
+            budget_chars=budget_chars,
+            max_tokens=budget.token_cap(budget_chars, settings.max_output_tokens)
+            if budget_chars is not None
+            else None,
+        )
+        for line, budget_chars in zip(items, budgets)
+    ]
 
 
 def _slot_seconds(segment: dict) -> float:
@@ -336,7 +330,14 @@ def translate_segments(
         return [dict(segment) for segment in segments]
 
     sources = [str(segment["text"]) for segment in segments]
-    translated = translate_lines(sources, source_language)
+    profile = get_profile()
+    first_pass_budgets = None
+    if profile.budget_first_pass:
+        first_pass_budgets = [
+            budget.chars_for_slot(_slot_seconds(segment), settings.target_ratio)
+            for segment in segments
+        ]
+    translated = translate_lines(sources, source_language, first_pass_budgets)
 
     if len(translated) != len(sources):
         raise MisalignedTranslationError(

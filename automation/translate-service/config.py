@@ -6,6 +6,9 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     model_path: Path
+    # The injected prompt/decoding contract for the model file.  The service
+    # itself stays model-agnostic: profiles own the only model-specific code.
+    profile: str
     data_dir: Path
     # llama.cpp threads. Left at 0 so llama.cpp picks the core count itself;
     # set it when the box is doing something else at the same time.
@@ -68,6 +71,7 @@ def load_settings() -> Settings:
         model_path=Path(
             os.environ.get("TRANSLATE_MODEL", "models/HY-MT1.5-1.8B-Q4_K_M.gguf")
         ),
+        profile=os.environ.get("TRANSLATE_PROFILE", "hunyuan-mt"),
         data_dir=Path(os.environ.get("DATA_DIR", "/data")),
         # 0 means "let llama.cpp pick the core count", so it is a valid floor.
         threads=_int("LLAMA_THREADS", "0", minimum=0),
