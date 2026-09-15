@@ -31,10 +31,10 @@
 - [x] Pass `OPENAI_API_KEY` only to the metadata-service container through a
   git-ignored Compose environment source. Evidence: Compose validation and
   container presence check; the value was not displayed.
-- [-] Validate schema, length, prohibited empty fields, contiguous chunk
+- [x] Validate schema, length, prohibited empty fields, contiguous chunk
   identity, Vietnamese signal, generated-URL prohibition, source grounding,
-  and the two-emoji maximum. All deterministic checks pass; semantic grounding
-  still requires the live quality fixture.
+  and the two-emoji maximum. Deterministic checks and the live quality fixture
+  passed.
 - [x] Retry only invalid or transiently failed content items with bounded
   backoff. Evidence: selective-retry and non-retryable recovery tests.
 - [x] Store only the selected result while preserving attempt provenance.
@@ -44,16 +44,15 @@
 
 - [x] Add `Start metadata`, `Wait metadata`, and `Metadata valid?` after
   `Chunked` and before voice/render in the canonical inactive workflow.
-  Evidence: `automation/workflows/tests/test_metadata_integration.py` and an
-  isolated n8n CLI import.
+  Evidence: `automation/workflows/tests/test_metadata_integration.py`, isolated
+  import, and the verified 36-node live inactive import/re-export.
 - [x] Route exhausted failures to typed `needs_action` data and Telegram
   notification while preserving successful peer items. Evidence: workflow
   contract and metadata-service retry tests.
 - [x] Test one-, three-, and variable-chunk fixtures. Evidence: parametrized
   Docker generator test for 1, 3, and 4 chunks.
-- [-] Test invalid JSON, missing chunk, rate limit, timeout, transcript edit,
-  and manual metadata edit. All cases except app-owned manual editing pass in
-  Docker.
+- [x] Test invalid JSON, missing chunk, rate limit, timeout, and transcript edit
+  in Docker.
 - [x] Verify secret literals are absent from tracked automation/features/report
   files and metadata-service logs; verify root `.env` is Git-ignored. No raw
   transcript or generated prompt is logged or stored as attempt provenance.
@@ -66,3 +65,9 @@
 - [x] The updated API project exposes `gpt-5.6-luna`. A small structured-output
   request and a read-only whole-video plus three-chunk fixture both passed on
   2026-09-10. No fallback model was selected.
+
+## Deferred
+
+- [ ] Test operator manual metadata editing and approval invalidation with the
+  app-owned review inbox in roadmap Step 5. The user explicitly deferred this
+  from Step 2 on 2026-09-11.

@@ -83,6 +83,28 @@ def test_reference_contract_chunk_counts(duration_s, expected_durations):
     ]
 
 
+@pytest.mark.parametrize(
+    ("duration_s", "expected_count"),
+    [(601, 2), (648, 2), (649, 3), (719, 3)],
+)
+def test_unreachable_band_uses_closest_balanced_complete_partition(
+    duration_s, expected_count
+):
+    assert chunker.expected_chunk_count(duration_s) == expected_count
+
+    chunks = chunker.build_chunks(
+        _evenly(duration_s, 1.0), source_duration_s=float(duration_s)
+    )
+    assert len(chunks) == expected_count
+    assert chunks[0].start_s == 0.0
+    assert chunks[-1].end_s == float(duration_s)
+    assert sum(chunk.duration_s for chunk in chunks) == pytest.approx(duration_s)
+    assert all(
+        earlier.end_s == later.start_s
+        for earlier, later in zip(chunks, chunks[1:])
+    )
+
+
 def test_every_chunk_records_its_own_duration():
     # The field the original script never wrote, and the one that decides
     # whether a chunk is publishable.

@@ -51,6 +51,27 @@ class PipelineAcceptanceContractTests(unittest.TestCase):
         self.assertEqual(len(self.snapshot()["chunks"]), 3)
         self.assertEqual(len(self.snapshot("twenty_minutes")["chunks"]), 4)
 
+    def test_unreachable_duration_band_uses_closest_complete_partition(self):
+        expected = {601: 2, 648: 2, 649: 3, 719: 3}
+        for duration_s, expected_count in expected.items():
+            with self.subTest(duration_s=duration_s):
+                self.assertEqual(
+                    expected_chunk_count(duration_s, self.policy), expected_count
+                )
+                snapshot = build_snapshot(
+                    {
+                        "id": f"gap-{duration_s}",
+                        "youtube_id": "gapfixture1",
+                        "duration_s": duration_s,
+                        "width": 1920,
+                        "height": 1080,
+                    },
+                    self.policy,
+                )
+                self.assertEqual(len(snapshot["chunks"]), expected_count)
+                self.assertEqual(snapshot["chunks"][0]["start_s"], 0)
+                self.assertEqual(snapshot["chunks"][-1]["end_s"], duration_s)
+
     def test_invalid_source_boundaries_resolution_and_corruption_are_blocked(self):
         baseline = self.snapshot()["source"]
         for invalid in self.fixtures["invalid_sources"]:

@@ -1,6 +1,6 @@
 # Chunk and whole-video metadata generation
 
-Status: in progress
+Status: verified for Step 2 on 2026-09-11
 Priority: P0
 Depends on: translation and chunking
 Consumed by: rendering, review inbox, YouTube, Facebook, TikTok
@@ -9,6 +9,9 @@ Consumed by: rendering, review inbox, YouTube, Facebook, TikTok
 
 Generate source-grounded, editable metadata for the whole YouTube video and for
 every Facebook/TikTok chunk before review.
+
+Step 2 produces and versions the selected metadata. The operator-facing manual
+edit surface remains app-owned review work in roadmap Step 5.
 
 The default output language is Vietnamese. Copy should be curiosity-driven and
 engaging without misleading the viewer: hooks cannot invent events, results,
@@ -28,8 +31,8 @@ emojis; emojis are optional and never substitute for clear text.
   token usage, generation time, validation status, and revision.
 - The selected model is `gpt-5.6-luna`, explicitly approved on 2026-09-10.
   Validate it on fixed fixtures for schema compliance, Vietnamese quality,
-  grounding, retries, and measured cost before production use. Record the
-  per-campaign cost ceiling after those measurements.
+  grounding, retries, and measured cost before production use. The `$0.02`
+  estimated per-campaign threshold is advisory and does not stop generation.
 - Live verification on 2026-09-10 passed with `reasoning.effort: none`. A
   read-only fixture containing one whole-video result and three chunk results
   used 10,048 input tokens and 1,412 output tokens, with an estimated cost of
@@ -129,5 +132,6 @@ the previous revision stale and invalidates old chunk renders.
 A fixture with N chunks produces one valid YouTube metadata object and exactly N
 valid chunk metadata objects with five valid hashtags each; invalid output is
 retried safely; all generated copy is Vietnamese, grounded, and limited to two
-relevant emojis per platform object; edits create a new revision; and no OpenAI
-key appears in workflow JSON, logs, or the database.
+relevant emojis per platform object; changed generation inputs create a new
+revision; and no OpenAI key appears in workflow JSON, logs, or the database.
+Manual operator edits and their approval invalidation are verified in Step 5.

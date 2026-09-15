@@ -1,13 +1,14 @@
 # n8n metadata integration - Step 2
 
-Status: canonical workflow verified; live import pending  
-Verified: 2026-09-10
+Status: canonical and live inactive workflow verified
+Verified: 2026-09-11
 
 ## Result
 
 The reviewed canonical workflow now requires selected metadata before voice
-and rendering can begin. The inactive live workflow was exported and compared
-first, but it was not imported, modified, or activated.
+and rendering can begin. After a pre-import export, it was imported in place
+into the existing live workflow and re-exported. It remains inactive and keeps
+its original identity and credential references.
 
 ```mermaid
 flowchart LR
@@ -46,30 +47,30 @@ flowchart LR
   makes affected prior render inputs stale.
 - The `$0.02` campaign estimate is a warning threshold, not a kill switch.
 
-## Live and canonical difference
+## Live and canonical state
 
 | Copy | Nodes | Active | Important difference |
 | --- | ---: | --- | --- |
-| Live n8n database | 30 | No | No metadata gate; invalid-input Telegram node still uses the older chat-ID expression. |
-| Canonical Git candidate | 36 | No | Six-node metadata gate plus the corrected source chat-ID expression. |
+| Live n8n database | 36 | No | Imported metadata gate and corrected source chat-ID expression. |
+| Canonical Git workflow | 36 | No | Matches the tested live workflow contract. |
 
-Because the JSON file and n8n database do not synchronize automatically, the
-new nodes will not appear in the editor until the canonical candidate is
-explicitly reviewed and imported.
+The JSON file and n8n database still do not synchronize automatically. Future
+workflow edits must begin with a fresh live export and comparison.
 
 ## Verification evidence
 
 - Metadata-service Docker tests: `36 passed`.
 - Shared callback regression tests: `2 passed`.
 - Canonical workflow metadata/media contract tests: `11 passed`.
+- The live post-import export passed the same `11` contract tests.
 - Isolated n8n CLI import: successful with 36 nodes and `active: false`; it used
   a temporary n8n user folder and did not touch the external `n8n_data` volume.
 - Live model fixture: one whole-video result plus three chunk results passed at
   an estimated `$0.003704` using `gpt-5.6-luna` with
   `reasoning.effort: none`.
 
-## Next safe action
+## Next boundary
 
-Review the six-node difference, then explicitly import the canonical workflow
-into the inactive live n8n database. Activation and real execution remain
-separate decisions.
+The user accepted the inactive import and contract evidence for Step 2. A live
+external execution with possible Telegram effects remains deferred to the
+signed handoff milestone in Step 4.

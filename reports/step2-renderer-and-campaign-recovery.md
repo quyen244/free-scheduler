@@ -249,9 +249,10 @@ two full-length 682.84 s 16:9 encodes.
 **Not executed, stated plainly.** Full renders at 5:00, 9:00, 10:00, 13:42, and
 20:00 were **not** run. Layer A verifies their chunk topology; it does not
 verify their encodes. A 20-minute source implies roughly 25 minutes of output
-media across whole and vertical, clean and branded assets, and that compute was
-not spent to tick a checkbox. This is an accepted, documented limitation, not a
-passing result.
+media across whole and vertical, clean and branded assets. The user must decide
+whether the layered evidence is sufficient for Step 2 or all five full encodes
+are required. On September 11, 2026, the user accepted the layered evidence;
+the five full encodes are therefore not required for Step 2 closure.
 
 ### Chunk planner finding
 
@@ -260,9 +261,34 @@ at 660 s, 2 chunks give 330 s (over `MAX`) and 3 chunks give 220 s (under
 `MIN`). The scorer's `abs(average - 270)` tie-break selects 3. The Layer C
 source at 682.841 s lands in exactly this gap, giving 3 chunks averaging
 227.6 s. This is the planner behaving as specified inside an unreachable band,
-not a bug, but it deserves a product decision.
+not a bug. The user confirmed on September 11, 2026 that the closest balanced
+complete partition should remain: the 4-5 minute range is a target here, while
+complete non-overlapping coverage and avoiding a tiny remainder remain hard
+requirements.
 
 Separately, `eL7f4oHqj5Q` (775.0 s) has 4 stored chunks while the current
 planner returns 3 (avg 258.3 s, in band). That row is at stage `chunked` with
 validation `pending` - a legacy pre-planner record, not a discrepancy in current
 code.
+
+## 5. September 11 regression and recovery evidence
+
+- Media-service Docker suite: 31 passed, including three-attempt transient
+  ingest recovery and non-retryable invalid-input/source-policy failures.
+- Whisper planner Docker suite: 22 passed, including 601/648/649/719-second
+  boundary cases with complete, contiguous coverage.
+- Acceptance contract: 13 passed.
+- Metadata-service Docker suite: 36 passed; shared callbacks: 2 passed.
+- Render-service model-free suite: 66 passed, 59 deselected; focused
+  manifest/landscape/vertical-brand suite: 23 passed.
+- Workflow contract: 11 passed. App suite: 35 passed. Production build passed.
+- All six Compose services reported healthy.
+- The ready `3gi_15UH9fQ` revision-1 manifest was independently revalidated:
+  all 8 assets still matched their recorded byte sizes and SHA-256 values.
+- The legacy `chunks/001/final.mp4` still fails `ffprobe` with `moov atom not
+  found`, but current database rows do not reference it and the ready manifest
+  uses only revisioned clean/branded output paths. It was not deleted.
+
+The user confirmed all Step 2 closure choices on September 11, 2026. Remaining
+external handoff and manual-review work stays in roadmap Steps 4 and 5, and the
+preserved legacy artifacts are not part of the current manifest path.

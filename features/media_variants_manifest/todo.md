@@ -7,7 +7,9 @@
 - [x] Define revisioned clean-master and
   `brands/<brand_id>/revision/<n>` variant paths. Revisioning clean paths keeps
   historical manifest checksums truthful after a source/voice/layout change.
-- [x] Enforce one chunk for 5-9 minute sources and balanced 4-5 minute chunks otherwise.
+- [x] Enforce one chunk for 5-9 minute sources and balanced chunks targeting
+  4-5 minutes otherwise, including the accepted closest-partition behavior for
+  the unreachable 601-719-second band.
 - [x] Preserve transcript-segment boundaries within the 15-second adjustment window.
 - [x] Name chunks `part_1`, `part_2`, and so on without gaps or overlap.
 - [x] Add the clean `yt-landscape` preset and direct whole-source renderer.
@@ -31,7 +33,10 @@
   manifest validator rejects invalid assets before `ready`.
   `test_corrupt_brand_asset_retry_reuses_verified_peers` proves the same
   revision repairs only the corrupt asset and preserves verified peers.
-- [ ] Test 5-, 9-, 10-, 13:42-, and 20-minute fixtures in Docker.
+- [x] Verify the 5-, 9-, 10-, 13:42-, and 20-minute matrix with the accepted
+  layered strategy: planner/topology coverage for every duration, short real
+  FFmpeg assets, and one 682.841-second full render. The user confirmed on
+  2026-09-11 that five separate full encodes are not required for Step 2.
 - [x] Test two brands never share branded paths or signature music. Evidence:
   `test_clean_vertical_and_brand.py::test_two_brands_keep_separate_paths_and_signature_music`.
 - [x] Visually inspect representative frames for both layouts. Evidence:

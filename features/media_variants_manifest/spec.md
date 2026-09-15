@@ -35,7 +35,9 @@ flowchart LR
 
 - YouTube never references a chunk; Facebook/TikTok never reference the whole.
 - Sources from 5-9 minutes create one chunk. Longer sources create variable,
-  balanced 4-5 minute chunks named `part_<1-based index>`.
+  balanced chunks targeting 4-5 minutes named `part_<1-based index>`. For the
+  mathematically unreachable 601-719-second band, use the closest balanced
+  complete partition rather than dropping content or creating a tiny remainder.
 - Boundaries may shift up to 15 seconds to the closest transcript-segment end;
   chunks remain ordered, unique, and non-overlapping.
 - A same-brand Facebook and TikTok target may reuse its branded vertical file.

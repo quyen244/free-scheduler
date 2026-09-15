@@ -1,6 +1,6 @@
 # Confirmed product decisions
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 
 ## Source input
 
@@ -16,13 +16,20 @@ Last updated: 2026-09-10
 - Duplicate protection prevents an accidental second active campaign; it does
   not permanently blacklist a source. Failed work can resume, and an operator
   can intentionally create a new campaign for an old source.
+- For the URL-only MVP, `SourceVideo`, `Campaign`, and `ProcessingAttempt`
+  provide sufficient source and work history. A separate `SourceSubmission`
+  table is deferred until multiple input methods or submission-level auditing
+  require it.
 
 ## Content and metadata
 
 - YouTube receives the whole video as 16:9. Facebook and TikTok receive unique,
   non-overlapping 9:16 chunks.
 - Chunk count is variable. Sources from 5-9 minutes produce one chunk. Longer
-  sources produce balanced 4-5 minute chunks with no tiny remainder.
+  sources produce balanced chunks targeting 4-5 minutes with no tiny
+  remainder. When no chunk count can satisfy that range (currently sources
+  from 601-719 seconds), use the closest balanced complete partition; never
+  drop or overlap source content merely to force the duration range.
 - A boundary may move up to 15 seconds to the nearest transcript segment ending
   so speech is not cut mid-sentence.
 - Chunk display names are `part_1`, `part_2`, and so on.
@@ -55,6 +62,9 @@ Last updated: 2026-09-10
   grounding, and retry acceptance fixtures before production use. Access and
   structured generation were verified with the updated API project on
   2026-09-10. Use `reasoning.effort: none` for this focused generation task.
+- Keep the `$0.02` estimated per-campaign metadata threshold as an advisory
+  warning, not a hard stop. Do not abandon a partially generated campaign only
+  because that threshold is crossed.
 
 ## Brands, approval, and publishing
 
@@ -83,11 +93,17 @@ Last updated: 2026-09-10
 - Editing post metadata does not rerender video. Editing visual text, subtitles,
   music, watermark, or media settings rerenders affected variants before a new
   approval can be requested.
+- The operator-facing manual metadata edit surface remains in roadmap Step 5,
+  where the app owns review and approval invalidation; it is not part of Step 2.
 
 ## Failure and retention
 
 - Retry transient failures according to error type. After automatic retries are
   exhausted, pause the campaign in `needs_action` rather than starting over.
+- Media ingest uses three total attempts for download and audio-extraction
+  failures, waiting 5 seconds and then 20 seconds. Invalid URLs and source
+  policy failures are not retried. An exhausted transient failure remains
+  operator-retryable from the ingest stage.
 - If a required chunk fails, the whole campaign remains unapprovable.
 - Record every internal failure. Telegram alerts only when operator action is
   required, followed by one final campaign summary.
@@ -96,6 +112,8 @@ Last updated: 2026-09-10
   seven days after publishing, and failed-campaign files three days after the
   last failure. Keep metadata and audit history until manual deletion.
 - Never delete assets referenced by active, approved, queued, or publishing work.
+- Preserve the unreferenced corrupt legacy media file and pre-planner chunk row
+  for now as diagnostic history. Do not reprocess or delete them during Step 2.
 
 ## System ownership
 
@@ -104,8 +122,19 @@ Last updated: 2026-09-10
 - PostgreSQL is the initial durable application/publish queue. Redis is deferred
   until load proves it necessary.
 - Official APIs are preferred. Browser/cookie automation is not an MVP path.
+- Keep durable n8n-to-app campaign-control wiring in roadmap Step 4. Step 2 does
+  not pull the signed handoff into the media-production boundary.
+
+## Step 2 verification boundary
+
+- Accept the layered duration evidence for Step 2: planner/topology coverage at
+  5:00, 9:00, 10:00, 13:42, and 20:00; short real-FFmpeg asset coverage; and one
+  representative 682.841-second full render. Full encodes of all five matrix
+  durations are not required for Step 2 closure.
+- Defer a live n8n execution with possible Telegram side effects to the signed
+  handoff milestone. The imported inactive workflow plus canonical/live-export
+  contract tests are sufficient for Step 2.
 
 ## Pending decisions
 
-- Per-campaign metadata cost ceiling after measuring representative fixtures.
 - Whether Shopee Affiliate Open API credentials are available.

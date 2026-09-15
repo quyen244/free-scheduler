@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import validation
-from errors import InvalidURLError, SourcePolicyError
+from errors import DownloadError, InvalidURLError, SourcePolicyError
 from main import app
 from media import extract_video_id
 
@@ -75,6 +75,25 @@ def test_job_endpoint_accepts_url_only(monkeypatch):
 
     assert response.status_code == 202
     assert response.json()["video_id"] == "aaaaaaaaaaa"
+
+
+def test_synchronous_download_failure_exposes_retry_contract(monkeypatch):
+    monkeypatch.setattr(
+        "main.media.get_or_download",
+        lambda _url: (_ for _ in ()).throw(DownloadError("provider unavailable")),
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/download",
+            json={"url": "https://www.youtube.com/watch?v=aaaaaaaaaaa"},
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "error": "provider unavailable",
+        "error_code": "download_failed",
+        "retryable": True,
+    }
 
 
 def test_sha256_is_stable(tmp_path):

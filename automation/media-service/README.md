@@ -77,17 +77,20 @@ When the work ends, the service `POST`s the finished job there:
 Paths are container-absolute. Every service mounts `/data` at the same place,
 so they are meaningful to the caller as-is — n8n moves paths, never bytes.
 
-**The callback fires on failure too**, with `state: "failed"`, `result: null`
-and a populated `error`. That is the whole point of it. A job that dies quietly
+**The callback fires on failure too**, with `state: "failed"`, a populated
+`error`, and a typed `result` containing `error_code` and `retryable`. Download
+and audio-extraction failures get three total attempts, with waits of 5 seconds
+and 20 seconds. Invalid URLs and source-policy failures are never retried. A
+job that dies quietly
 leaves an n8n execution waiting on a resume that will never come: nothing turns
 red, nothing alerts, and it is found days later by wondering where a video
 went. Three ways a job can die, all of them covered by a test:
 
 | Death | What arrives |
 |---|---|
-| yt-dlp or ffmpeg fails | `failed`, with the tool's own message |
+| yt-dlp or ffmpeg fails three times | `failed`, typed as operator-retryable |
 | the URL is not a YouTube video URL | no job at all — a synchronous `400` |
-| the service restarts mid-download | `failed`, "media-service restarted while this job was running" |
+| the service restarts mid-download | `failed`, typed as `ingest_interrupted` and retryable |
 
 That last one is settled at **startup**: anything still marked `running` belongs
 to a process that no longer exists, so the next boot fails it and calls back.
@@ -114,6 +117,10 @@ long as it takes.
 |---|---|
 | `400` | The URL doesn't look like a YouTube video URL. |
 | `502` | `yt-dlp` couldn't fetch it (private, deleted, geo-blocked — or see below), or `ffmpeg` couldn't extract the audio. |
+
+Every error response includes `error_code` and `retryable`. The synchronous
+endpoint reports the failure immediately; the approved automatic retry policy
+is applied by the asynchronous `/media/jobs` production path.
 
 ### `GET /health`
 

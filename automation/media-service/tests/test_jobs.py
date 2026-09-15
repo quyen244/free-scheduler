@@ -19,6 +19,7 @@ import httpx
 
 import jobs
 import media
+from errors import AudioExtractionError, DownloadError, SourcePolicyError
 from shared import pipeline_db
 
 # uvicorn, in this same container. See the module docstring.
@@ -142,7 +143,11 @@ def test_a_failed_ingest_calls_back_too_instead_of_parking_the_workflow():
 
     assert payload["job_id"] == job_id
     assert payload["state"] == "failed"
-    assert payload["result"] is None
+    assert payload["result"] == {
+        "error_code": "download_failed",
+        "retryable": True,
+        "attempts": 3,
+    }
     # The message has to name something, or the Telegram alert reads
     # "something failed" and the operator opens a terminal anyway.
     assert payload["error"]
@@ -201,3 +206,104 @@ def test_reaping_an_orphan_clears_the_bytes_it_left_behind():
         assert list(directory.glob("raw.part.*")) == []
     finally:
         shutil.rmtree(directory, ignore_errors=True)
+
+
+def _fake_record(video_id: str) -> dict[str, object]:
+    return {
+        "video_id": video_id,
+        "title": "fixture",
+        "duration_s": 600.0,
+        "width": 1920,
+        "height": 1080,
+        "source_hash": "a" * 64,
+    }
+
+
+def _delete_job(job_id: str) -> None:
+    with pipeline_db.connect() as db:
+        db.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+
+
+def test_transient_ingest_retries_twice_then_preserves_success(monkeypatch):
+    video_id = "retryok0001"
+    job_id = pipeline_db.create_job(video_id, "ingest")
+    attempts = 0
+    waits: list[float] = []
+
+    def ingest(_url: str):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise DownloadError("temporary provider failure")
+        if attempts == 2:
+            raise AudioExtractionError("temporary ffmpeg failure")
+        return _fake_record(video_id), False
+
+    monkeypatch.setattr(jobs.media, "get_or_download", ingest)
+    monkeypatch.setattr(jobs.time, "sleep", waits.append)
+    monkeypatch.setattr(jobs, "_notify", lambda _job_id: None)
+    try:
+        jobs.run_ingest(job_id, "https://youtu.be/retryok0001")
+        stored = pipeline_db.get_job(job_id)
+        assert stored is not None
+        assert stored["state"] == "done"
+        assert stored["result"]["attempts"] == 3
+        assert waits == [5.0, 20.0]
+    finally:
+        _delete_job(job_id)
+
+
+def test_transient_ingest_exhaustion_is_typed_and_operator_retryable(monkeypatch):
+    video_id = "retrybad001"
+    job_id = pipeline_db.create_job(video_id, "ingest")
+    attempts = 0
+
+    def ingest(_url: str):
+        nonlocal attempts
+        attempts += 1
+        raise DownloadError("temporary provider failure")
+
+    monkeypatch.setattr(jobs.media, "get_or_download", ingest)
+    monkeypatch.setattr(jobs.time, "sleep", lambda _delay: None)
+    monkeypatch.setattr(jobs, "_notify", lambda _job_id: None)
+    try:
+        jobs.run_ingest(job_id, "https://youtu.be/retrybad001")
+        stored = pipeline_db.get_job(job_id)
+        assert stored is not None
+        assert stored["state"] == "failed"
+        assert stored["result"] == {
+            "error_code": "download_failed",
+            "retryable": True,
+            "attempts": 3,
+        }
+        assert attempts == 3
+    finally:
+        _delete_job(job_id)
+
+
+def test_source_policy_failure_is_not_retried(monkeypatch):
+    video_id = "policybad01"
+    job_id = pipeline_db.create_job(video_id, "ingest")
+    attempts = 0
+
+    def ingest(_url: str):
+        nonlocal attempts
+        attempts += 1
+        raise SourcePolicyError("duration_out_of_range", "too short")
+
+    monkeypatch.setattr(jobs.media, "get_or_download", ingest)
+    monkeypatch.setattr(jobs.time, "sleep", lambda _delay: None)
+    monkeypatch.setattr(jobs, "_notify", lambda _job_id: None)
+    try:
+        jobs.run_ingest(job_id, "https://youtu.be/policybad01")
+        stored = pipeline_db.get_job(job_id)
+        assert stored is not None
+        assert stored["state"] == "failed"
+        assert stored["result"] == {
+            "error_code": "duration_out_of_range",
+            "retryable": False,
+            "attempts": 1,
+        }
+        assert attempts == 1
+    finally:
+        _delete_job(job_id)

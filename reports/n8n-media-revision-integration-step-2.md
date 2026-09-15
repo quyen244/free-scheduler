@@ -1,7 +1,7 @@
 # n8n media-revision integration - Step 2
 
-Status: canonical workflow verified; live import pending  
-Verified: 2026-09-10
+Status: canonical and live inactive workflow verified
+Verified: 2026-09-11
 
 ## Result
 
@@ -36,8 +36,8 @@ flowchart LR
 ## Evidence
 
 - Canonical workflow contract: 11 tests passed.
-- Metadata-service Docker suite: 38 tests passed.
-- Render-service model-free Docker suite: 48 passed, 59 deselected.
+- Metadata-service Docker suite: 36 tests passed.
+- Render-service model-free Docker suite: 66 passed, 59 deselected.
 - Production endpoint job `ab1397127dec471a8a1365480b86c069` produced ready
   render revision 4 with four correctly probed assets and zero failures.
 - `test_corrupt_brand_asset_retry_reuses_verified_peers` damaged branded
@@ -46,8 +46,12 @@ flowchart LR
 - An isolated n8n CLI import succeeded with one inactive 36-node workflow. The
   disposable container used `/tmp/reup-step2-isolated` and did not mount the
   external `n8n_data` volume.
+- The reviewed canonical workflow was then imported in place into the existing
+  live workflow. Its 36-node post-import export passed the same 11 contract
+  tests, remained inactive, and preserved workflow identity and credentials.
 
 ## Live boundary
 
-The live n8n database was not imported, changed, or activated. Import remains
-a separate explicitly authorized operation after reviewing the canonical JSON.
+The live workflow import is complete and the workflow remains inactive. The
+user deferred activation and a live external execution with possible Telegram
+effects to the signed handoff milestone in Step 4.

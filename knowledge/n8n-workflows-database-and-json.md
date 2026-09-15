@@ -27,24 +27,25 @@ The JSON files are backups and deployment artifacts. n8n does not load or
 synchronize them automatically. A file only enters the database when it is
 explicitly imported.
 
-## Current canonical candidate
+## Current canonical workflow
 
 The live database workflow was exported and round-trip verified on September 9,
 2026. On September 10, the canonical JSON was extended with the reviewed
-metadata gate and media-revision render handoff. It has not been imported into
-the live database.
+metadata gate and media-revision render handoff. On September 11, it was
+imported in place into the existing live workflow, re-exported, and checked
+against the same eleven structural contract tests. The workflow remains
+inactive and keeps its original identity and credential references.
 
 | Version | Nodes | Last update |
 | --- | ---: | --- |
-| Live database `video editing` | 30 | September 10, 2026 export |
-| Canonical `reup-pipeline.json` | 36 | September 10, 2026 media-revision candidate |
+| Live database `video editing` | 36 | September 11, 2026 post-import export |
+| Canonical `reup-pipeline.json` | 36 | September 11, 2026 imported canonical |
 | `f7-render.json` | 24 | September 7, 2026 |
-| Live-to-canonical difference | 6 metadata nodes | Import pending |
+| Live-to-canonical difference | None in the tested contract | Import verified |
 
-The live export also differs from canonical input handling: live still sends
-`videoUrl` as the invalid-input Telegram `chatId`, while canonical keeps the
-corrected source `chatId` and Vietnamese guidance. Do not overwrite that fix
-with the older live value.
+The corrected source `chatId` and Vietnamese invalid-input guidance are now in
+both the canonical file and live workflow. Do not overwrite them with an older
+phase snapshot or pre-import export.
 
 The six canonical metadata nodes are:
 
@@ -55,8 +56,8 @@ The six canonical metadata nodes are:
 - `Metadata failed`
 - `Metadata needs action`
 
-Do not import `f7-render.json` over the current workflow. It is an older phase
-snapshot. Use `reup-pipeline.json` as the reviewed import target.
+Do not import `f7-render.json` or a pre-import backup over the current workflow.
+They are older snapshots. Use `reup-pipeline.json` as the canonical source.
 
 All workflows were inactive at the time of inspection. An inactive workflow
 can be edited and tested manually, but its production webhook is not active.
@@ -74,8 +75,9 @@ flowchart LR
     F --> T[Telegram needs action]
 ```
 
-The canonical JSON passed eleven structural contract tests and imported into an
-isolated n8n database. This validation did not touch the live `n8n_data` volume.
+The canonical JSON passed eleven structural contract tests before and after its
+in-place live import. Pre/post-import exports are stored in
+`artifacts/n8n-backups/`; the external `n8n_data` volume was preserved.
 
 After voice generation, the canonical `Start render` node calls
 `/media-revision/jobs`. Its success gate requires a completed job, a `ready`
@@ -108,7 +110,13 @@ flowchart TD
     TO -- Yes --> CHUNK
 
     CHUNK --> CHUNKED["Chunked"]
-    CHUNKED --> SV["Start voice"]
+    CHUNKED --> SM["Start metadata"]
+    SM --> WM["Wait for metadata"]
+    WM --> MO{"Metadata valid?"}
+    MO -- No --> MF["Metadata failed"]
+    MF --> TGM["Telegram needs action"]
+    MO -- Yes --> MS["Metadata selected"]
+    MS --> SV["Start voice"]
     SV --> WV["Wait for voice"]
     WV --> VO{"Voice ok?"}
 

@@ -28,19 +28,28 @@ app = FastAPI(lifespan=lifespan)
 
 @app.exception_handler(InvalidURLError)
 async def handle_invalid_url(request: Request, exc: InvalidURLError) -> JSONResponse:
-    return JSONResponse(status_code=400, content={"error": str(exc)})
+    return JSONResponse(
+        status_code=400,
+        content={"error": str(exc), "error_code": exc.code, "retryable": False},
+    )
 
 
 @app.exception_handler(DownloadError)
 async def handle_download_error(request: Request, exc: DownloadError) -> JSONResponse:
-    return JSONResponse(status_code=502, content={"error": str(exc)})
+    return JSONResponse(
+        status_code=502,
+        content={"error": str(exc), "error_code": exc.code, "retryable": True},
+    )
 
 
 @app.exception_handler(AudioExtractionError)
 async def handle_extraction_error(
     request: Request, exc: AudioExtractionError
 ) -> JSONResponse:
-    return JSONResponse(status_code=502, content={"error": str(exc)})
+    return JSONResponse(
+        status_code=502,
+        content={"error": str(exc), "error_code": exc.code, "retryable": True},
+    )
 
 
 @app.exception_handler(SourcePolicyError)

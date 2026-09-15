@@ -31,8 +31,9 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 - [x] Allow failed-stage resume and intentional reprocessing without
   permanently blacklisting the source URL.
 - [ ] Confirm Shopee Affiliate Open API `app_id` and `secret_key` availability.
-- [ ] Set and enforce the metadata cost ceiling, and calibrate exact
-  signature-music ducking behavior. The live `gpt-5.6-luna` fixture passed.
+- [x] Keep `$0.02` as an advisory metadata warning and calibrate exact
+  signature-music ducking behavior. The live `gpt-5.6-luna` and music fixtures
+  passed; the user confirmed warning-only cost handling on 2026-09-11.
 
 ## P0 — prove assumptions and contracts
 
@@ -40,10 +41,13 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 - [x] [Pipeline acceptance contract](pipeline_acceptance_contract/todo.md) — 12
   provider-free tests passed; [evidence](../reports/pipeline-acceptance-contract-step-1.md).
 - [x] [Foundation contract](foundation_and_rights/todo.md)
-- [ ] [Source ingest and validation](source_ingest_validation/todo.md)
-- [ ] [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md)
+- [x] [Source ingest and validation](source_ingest_validation/todo.md) - Step 2
+  URL-only scope verified; external n8n execution is deferred to Step 4.
+- [x] [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md)
+  - Step 2 generation scope verified; manual editing is deferred to Step 5.
 - [ ] [Brand profiles and branded variants](brand_profiles/todo.md)
-- [ ] [Media variants and manifest](media_variants_manifest/todo.md)
+- [x] [Media variants and manifest](media_variants_manifest/todo.md) - verified
+  under the user-approved layered duration strategy.
 - [ ] [Platform sandbox](platform_sandbox/todo.md)
 
 ## P1 — first reliable YouTube vertical slice

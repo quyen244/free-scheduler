@@ -1,6 +1,6 @@
 # Step 2 progress - source preflight and balanced chunks
 
-Status: in progress - see "Remaining Step 2 work"
+Status: complete under the user-approved Step 2 scope and evidence boundary
 Verified: 2026-09-11
 
 Renderer topology, encoder selection, campaign recovery, and the fixture
@@ -31,6 +31,10 @@ Implemented:
   status/error code, chunk name, and boundary shift.
 - Typed recovery payloads such as `duration_out_of_range`,
   `resolution_too_low`, and `media_corrupt`.
+- Production-path media ingest retries download/network and audio-extraction
+  failures up to three total attempts, waiting 5 seconds and then 20 seconds.
+  Invalid URLs and source-policy failures are not retried. Exhausted transient
+  failures retain a typed, operator-retryable result.
 - Balanced chunk planning using video duration, including silent intro/outro,
   with transcript-safe boundaries no more than 15 seconds from the target.
 - Stable names `part_1`, `part_2`, and so on.
@@ -108,14 +112,16 @@ Implemented:
 
 ## Verification
 
-- Media-service source validation and URL normalization: `21 passed` inside
-  Docker.
-- Whisper balanced chunk unit subset: `12 passed` inside Docker.
+- Media-service source validation, URL normalization, typed failure, and ingest
+  retry suite: `31 passed` inside Docker on 2026-09-11.
+- Whisper balanced chunk planner suite: `22 passed` inside Docker on
+  2026-09-11, including complete, contiguous coverage at 601, 648, 649, and
+  719 seconds.
 - Metadata service schemas, Responses request contract, revision persistence,
   selective retry, cached reuse, transcript-change invalidation, and restart
   recovery, duplicate-job reuse, safe renderer handoff, and 1/3/4-chunk
   fixtures, typed API failures, and soft cost warnings: `36 passed` inside
-  Docker. The current full metadata-service suite is `38 passed`. Shared
+  Docker. The current full metadata-service suite is `36 passed`. Shared
   callback regression tests: `2 passed`.
 - Canonical workflow metadata/media contract: `11 passed` against the canonical
   file, and `11 passed` again against the workflow re-exported from the live
@@ -127,7 +133,7 @@ Implemented:
   `ffprobe`.
 - Render-service media-revision subset: `23 passed` for `test_manifest.py`,
   `test_clean_landscape.py`, and `test_clean_vertical_and_brand.py`.
-- Render-service model-free contract suite: `48 passed, 59 deselected` with
+- Render-service model-free contract suite: `66 passed, 59 deselected` with
   `pytest -q -m no_pipeline`.
 - Corrupt-asset recovery damaged one branded `part_2`, retried the same
   revision, and reused all five verified peers without changing their file
@@ -186,8 +192,13 @@ Implemented:
 - Installed SQLite database was migrated in place; existing `n8n_data` was not
   recreated or deleted.
 - `docker compose config --quiet` passed.
-- `media-service`, `metadata-service`, `whisper-transcript-service`, and `n8n`
-  reported healthy.
+- `media-service`, `metadata-service`, `whisper-transcript-service`,
+  `render-service`, `n8n`, and `translate-service` reported healthy.
+- Acceptance contract: `13 tests`, all passed.
+- App regression suite: `35 tests`, all passed. `npm run build` also completed
+  successfully.
+- The ready long-source manifest was independently revalidated on 2026-09-11:
+  all 8 assets matched their recorded size and SHA-256, with 0 failures.
 
 ## Important recovery behavior
 
@@ -201,23 +212,24 @@ No rights marker or additional data field is required.
 
 ## Remaining Step 2 work
 
-- Full-length renders at 5:00, 9:00, 10:00, 13:42, and 20:00 were not executed.
-  Verification is layered instead: chunk-topology contract tests for every
-  duration in the matrix, short real-FFmpeg asset tests, and one representative
-  `682.841 s` run that reached a `ready` manifest. This is an accepted,
-  documented limitation - the chunk counts are verified, the encodes at those
-  durations are not.
-- The chunk planner has an unreachable band. No chunk count satisfies
-  `240-300 s` for sources between `601 s` and `719 s`; the `abs(average - 270)`
-  tie-break resolves it, giving 3 chunks averaging `227.6 s` at `682.841 s`.
-  This needs a product decision, not a code fix.
-- The campaign control plane is not yet wired into the n8n stages. The models,
-  domain layer, and HTTP endpoints exist and are tested, but n8n does not call
-  them yet, so campaign rows are still created by tests and by direct API calls
-  rather than by the pipeline.
-- Legacy pipeline row `eL7f4oHqj5Q` (`775.0 s`, stage `chunked`, validation
-  `pending`) has 4 stored chunks while the current planner returns 3. It
-  predates the planner and was left untouched.
+None under the scope approved by the user on September 11, 2026.
+
+The following are deliberately deferred rather than silently counted as
+finished Step 2 work:
+
+- Full encodes of every duration-matrix entry are not required; the accepted
+  layered evidence is documented above.
+- A live external n8n execution and signed app handoff remain Step 4.
+- Manual metadata editing remains Step 5.
+- A separate `SourceSubmission` table is deferred until submission-level audit
+  or multiple input methods need it.
+- `$0.02` remains an advisory metadata warning rather than a hard stop.
+- The unreferenced corrupt legacy file and pre-planner row remain preserved as
+  diagnostic history.
+
+Already decided and therefore not remaining work: for the unreachable 601-719
+second band, keep the closest balanced complete partition. Tests now cover the
+601/648/649/719-second boundary behavior.
 
 ## Corrected earlier claims
 

@@ -108,22 +108,31 @@ without calling an external platform.
 Goal: make the local production path correct from input validation through
 metadata, branded rendering, and media output.
 
-Status: in progress. Source preflight, balanced chunk planning, metadata
-generation, the canonical n8n metadata/media gates, and the revisioned
-clean/branded media job are verified; the full-length fixture matrix and live
-n8n import remain.
+Status: verified on September 11, 2026 under the accepted evidence and scope
+boundaries below.
 
-- [ ] Complete [Source ingest and validation](source_ingest_validation/todo.md).
-- [ ] Complete [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md).
+- [x] Complete the Step 2 scope of
+  [Source ingest and validation](source_ingest_validation/todo.md). A separate
+  submission-history table and external n8n run are explicitly deferred.
+- [x] Complete the Step 2 scope of
+  [Chunk and whole-video metadata generation](chunk_metadata_generation/todo.md).
+  Manual editing remains app-owned Step 5 work and `$0.02` remains advisory.
 - [x] Complete the mock-profile work in [Brand profiles](brand_profiles/todo.md).
   Durable app models remain P1 work. Evidence: calibrated brand fixtures and
   production endpoint job `ab1397127dec471a8a1365480b86c069`.
-- [ ] Complete [Media variants and manifest](media_variants_manifest/todo.md).
+- [x] Complete [Media variants and manifest](media_variants_manifest/todo.md)
+  under the accepted layered-duration verification strategy.
 - [x] Insert metadata generation after `Chunked` and before voice/render in the
-  reviewed canonical JSON. Live import remains intentionally pending.
+  reviewed canonical JSON and import it in place into the existing inactive
+  live workflow. Evidence: 36-node post-import export and 11 passing workflow
+  contract tests; workflow identity and credential references were preserved.
 - [x] Define and Docker-test strict `metadata.v1` schemas for one YouTube result
   and each chunk's visual, Facebook, and TikTok metadata.
 - [x] Replace greedy four-minute chunking with the accepted balanced policy.
+- [x] Keep the closest balanced complete partition for the mathematically
+  unreachable 601-719 second band; 4-5 minutes remains a target rather than a
+  hard rejection rule. Evidence: user decision on September 11, 2026 and the
+  existing 682.841-second ready-manifest fixture.
 - [x] Persist stable `part_<n>` names and transcript-boundary shift evidence.
 - [x] Add typed source validation with duration, readability,
   resolution, `ffprobe`, and SHA-256 checks before transcription.
@@ -151,7 +160,9 @@ n8n import remain.
 - [x] Preserve stable asset IDs and paths across safe retries. Evidence:
   same-revision retry job `cd9b3b170c204875afcfc59ece35c068` completed with
   the existing ready manifest and four assets.
-- [ ] Test 5-, 9-, 10-, 13:42-, and 20-minute fixtures inside Docker.
+- [x] Verify the 5-, 9-, 10-, 13:42-, and 20-minute duration matrix using the
+  accepted layered strategy. Planner topology is covered for all five;
+  full-length encodes are intentionally not required for Step 2.
 - [x] Test OpenAI transient failure and one corrupt-render recovery without
   repeating successful stages. Evidence:
   `test_selective_retry_persists_provenance_and_reuses_selected_results` and
@@ -159,6 +170,13 @@ n8n import remain.
 - [x] Inspect representative frames from both layouts. Evidence:
   `reports/step2-revision3-branded-whole-frame.jpg` and
   `reports/step2-revision3-branded-part1-frame.jpg`.
+
+Accepted closure boundary: layered duration evidence is sufficient; the live
+external n8n/Telegram run and signed campaign-control handoff remain Step 4;
+manual metadata editing remains Step 5; no separate `SourceSubmission` table is
+required for the URL-only MVP; `$0.02` remains warning-only; and legacy
+unreferenced artifacts are preserved. Confirmed by the user on September 11,
+2026.
 
 Expected output:
 
@@ -187,10 +205,18 @@ Evidence:
 - [Media manifest contract](../reports/media-manifest-contract-step-2.md)
 - Render-service media revision Docker subset:
   `docker compose run --rm -e PYTHONPATH=/app -w /app render-service python -m pytest -q tests/test_manifest.py tests/test_clean_landscape.py tests/test_clean_vertical_and_brand.py`
-  - 20 tests passed on September 10, 2026.
+  - 23 tests passed on September 11, 2026.
 - Render-service model-free contract suite:
   `docker compose run --rm -e PYTHONPATH=/app -w /app render-service python -m pytest -q -m no_pipeline`
-  - 48 tests passed, 59 deselected on September 10, 2026.
+  - 66 tests passed, 59 deselected on September 11, 2026.
+- Media-service full Docker suite: 31 tests passed on September 11, 2026,
+  including typed ingest failures and automatic retry coverage.
+- Whisper planner full Docker suite: 22 tests passed on September 11, 2026,
+  including 601/648/649/719-second boundary coverage.
+- Acceptance contract: 13 tests passed on September 11, 2026.
+- Metadata-service full Docker suite: 36 tests passed on September 11, 2026.
+- App regression suite: 35 tests passed; `npm run build` passed on September
+  11, 2026.
 - Short fixture production endpoint:
   `/media-revision/jobs` for `jNQXAC9IVRw`, render revision 3, job
   `f4f842d3e00c4288a3c5fa464351ed94`: ready manifest, 4 assets, 0 failures.
@@ -204,6 +230,10 @@ Evidence:
 Done when: a three-chunk source creates valid selected metadata, clean masters,
 and mock-branded landscape/vertical variants without ambiguous filenames or
 unrecoverable stage failure.
+
+Verified: source `3gi_15UH9fQ` produced a ready three-chunk, one-brand revision
+with 8 assets and 0 failures; all 8 assets were revalidated against recorded
+byte sizes and SHA-256 values on September 11, 2026.
 
 ## Step 3 - make the manifest the completion gate
 

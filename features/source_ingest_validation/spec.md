@@ -1,6 +1,6 @@
 # Source ingest and validation
 
-Status: proposed
+Status: verified for Step 2 on 2026-09-11
 Priority: P0
 Depends on: foundation contract
 Consumed by: transcription, chunking, campaign review
@@ -51,15 +51,17 @@ stateDiagram-v2
 
 ```mermaid
 erDiagram
-    SOURCE_VIDEO ||--o{ SOURCE_SUBMISSION : identified_by
     SOURCE_VIDEO ||--o{ CAMPAIGN : reused_by
     CAMPAIGN ||--o{ PROCESSING_ATTEMPT : executes
     SOURCE_VIDEO ||--o{ SOURCE_ARTIFACT : stores
 ```
 
-`SOURCE_VIDEO` holds normalized YouTube ID and downloaded content hash. A
-submission records the URL used. A failed `PROCESSING_ATTEMPT` never makes the
-source permanently unusable.
+`SOURCE_VIDEO` holds the submitted URL, normalized YouTube ID, and downloaded
+content hash. `CAMPAIGN` and `PROCESSING_ATTEMPT` preserve durable work history.
+The user accepted these records for the URL-only MVP; a separate submission
+history table is deferred until multiple input methods or submission-level
+auditing require it. A failed `PROCESSING_ATTEMPT` never makes the source
+permanently unusable.
 
 ## Edge cases and recovery
 
