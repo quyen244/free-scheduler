@@ -73,6 +73,8 @@ def render_media_revision(
     brand_ids: list[str],
     vertical_preset_name: str = "vertical-clean",
     landscape_preset_name: str = "yt-landscape",
+    vertical_preset_override: dict | None = None,
+    landscape_preset_override: dict | None = None,
     metadata_revision_id: str | None = None,
     on_progress: Progress | None = None,
 ) -> manifest.MediaManifest:
@@ -104,8 +106,8 @@ def render_media_revision(
             on_progress(1.0)
         return existing
 
-    vertical_preset = library.load_preset(vertical_preset_name)
-    landscape_preset = library.load_preset(landscape_preset_name)
+    vertical_preset = vertical_preset_override or library.load_preset(vertical_preset_name)
+    landscape_preset = landscape_preset_override or library.load_preset(landscape_preset_name)
     profiles = [brand.load(brand_id) for brand_id in brand_ids]
     transcript = library.load_transcript(video_id)
     segments = transcript.get("segments") or []

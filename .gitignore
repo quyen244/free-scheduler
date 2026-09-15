@@ -54,3 +54,24 @@ next-env.d.ts
 /automation/**/__pycache__/
 /automation/**/.pytest_cache/
 /automation/**/*.pyc
+
+# Local work products and visual/media assets (do not commit)
+/features/
+/artifacts/
+/reports/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
+*.tiff
+*.svg
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.m4v
+
+/automation/data/presets

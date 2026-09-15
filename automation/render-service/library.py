@@ -28,6 +28,7 @@ _VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 # applies to them as to a video id.
 _PRESET_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _ASSET_FILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_EDITOR_ASSET = re.compile(r"^editor:([a-z0-9][a-z0-9-]{1,62}):([A-Za-z0-9][A-Za-z0-9_. -]{0,127})$")
 
 
 def video_dir(video_id: str) -> Path:
@@ -109,11 +110,29 @@ def load_preset(name: str) -> dict:
 
 
 def background_path(file_name: str) -> Path:
+    editor = _editor_asset(file_name)
+    if editor:
+        return editor
     return presets_dir() / BACKGROUNDS_DIR / Path(file_name).name
 
 
 def asset_path(file_name: str) -> Path:
+    editor = _editor_asset(file_name)
+    if editor:
+        return editor
     return presets_dir() / Path(file_name).name
+
+
+def _editor_asset(value: str) -> Path | None:
+    """Resolve an editor asset without allowing editor JSON to name a path."""
+    match = _EDITOR_ASSET.fullmatch(value)
+    if not match:
+        return None
+    preset_id, filename = match.groups()
+    path = settings.data_dir / "preset-editor" / "assets" / preset_id / filename
+    if not path.is_file():
+        raise PresetNotFoundError(f"editor asset is missing at {path}")
+    return path
 
 
 def brand_config_path(brand_id: str) -> Path:

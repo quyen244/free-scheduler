@@ -32,6 +32,7 @@ export default function Navbar() {
       ]
     : [
         { name: "Workspace", path: "/" },
+        { name: "Visual editor", path: "/preset-editor" },
         { name: "Gallery", path: "/gallery" },
       ];
 

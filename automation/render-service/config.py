@@ -36,6 +36,10 @@ class Settings:
     # never sacrificed — but it is reported. See timing.py.
     min_ratio: float
     max_ratio: float
+    # RVM is deliberately kept out of the Docker layer. The checkpoint is a
+    # runtime asset on the bind mount, just like the TTS weights, so rebuilding
+    # the service never downloads it again.
+    rvm_model_dir: Path
 
 
 def _int(name: str, default: int, minimum: int = 1) -> int:
@@ -93,6 +97,7 @@ def load_settings() -> Settings:
         tts_provider=_provider("TTS_PROVIDER", "cpu"),
         min_ratio=_float("TTS_MIN_RATIO", 0.75),
         max_ratio=_float("TTS_MAX_RATIO", 1.35),
+        rvm_model_dir=Path(os.environ.get("RVM_MODEL_DIR", "/models/rvm")),
     )
 
 

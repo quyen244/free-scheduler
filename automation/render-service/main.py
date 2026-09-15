@@ -6,9 +6,12 @@ from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 import jobs
+import matting
+import matting_jobs
 import brand
 import library
 import render
+import visual_preset
 import voice
 from config import settings
 from errors import (
@@ -27,6 +30,7 @@ from schema import (
     JobAccepted,
     MediaRevisionJobRequest,
     RenderJobRequest,
+    PresetMattingRequest,
     VoiceJobRequest,
 )
 from shared import pipeline_db
@@ -92,6 +96,48 @@ async def list_voices() -> dict[str, object]:
     return {"voices": list(voice.SHIPPED_VOICES), "default": settings.voice}
 
 
+@app.get("/preset-editor/rvm")
+def rvm_status() -> dict[str, object]:
+    return matting.model_status()
+
+
+@app.get("/preset-editor/presets")
+def list_editor_presets() -> dict[str, object]:
+    return {"presets": visual_preset.list_presets()}
+
+
+@app.get("/preset-editor/presets/{preset_id}/draft")
+def get_editor_draft(preset_id: str) -> dict[str, object]:
+    return visual_preset.load_draft(preset_id).model_dump(mode="json", exclude_none=True)
+
+
+@app.post("/preset-editor/drafts")
+def save_editor_draft(payload: dict[str, object]) -> dict[str, object]:
+    return visual_preset.save_draft(payload).model_dump(mode="json", exclude_none=True)
+
+
+@app.post("/preset-editor/publish")
+def publish_editor_preset(payload: dict[str, object]) -> dict[str, object]:
+    return visual_preset.publish(payload).model_dump(mode="json", exclude_none=True)
+
+
+@app.get("/preset-editor/presets/{preset_id}/revisions/{revision}")
+def get_published_editor_preset(preset_id: str, revision: int) -> dict[str, object]:
+    return visual_preset.load_published(preset_id, revision).model_dump(mode="json", exclude_none=True)
+
+
+@app.post("/preset-editor/matting", status_code=202)
+def create_matting_job(request: PresetMattingRequest, background: BackgroundTasks) -> dict[str, object]:
+    accepted = matting_jobs.create(request.preset_id, request.host_asset, request.corrections)
+    background.add_task(matting_jobs.run, str(accepted["job_id"]))
+    return accepted
+
+
+@app.get("/preset-editor/matting/{job_id}")
+def get_matting_job(job_id: str) -> dict[str, object]:
+    return matting_jobs.read(job_id)
+
+
 @app.post("/voice/jobs", response_model=JobAccepted, status_code=202)
 def create_voice_job(request: VoiceJobRequest, background: BackgroundTasks) -> JobAccepted:
     # Both checked here rather than in the worker: an unknown voice and an
@@ -127,8 +173,14 @@ def create_render_job(request: RenderJobRequest, background: BackgroundTasks) ->
 def create_media_revision_job(
     request: MediaRevisionJobRequest, background: BackgroundTasks
 ) -> JobAccepted:
-    library.load_preset(request.vertical_preset)
-    library.load_preset(request.landscape_preset)
+    if request.preset_id is not None:
+        # Published editor config is validated (including allowlisted assets)
+        # before a job row exists. A malformed revision is caller input, not a
+        # background failure that n8n must wait to discover.
+        visual_preset.load_published(request.preset_id, request.preset_revision or 0)
+    else:
+        library.load_preset(request.vertical_preset)
+        library.load_preset(request.landscape_preset)
     library.load_voice_track(request.video_id)
     if not pipeline_db.chunks_for(request.video_id):
         raise NoChunksError(
@@ -150,6 +202,8 @@ def create_media_revision_job(
         request.vertical_preset,
         request.landscape_preset,
         request.metadata_revision_id,
+        request.preset_id,
+        request.preset_revision,
     )
     return JobAccepted(job_id=job_id, video_id=request.video_id, state="queued")
 

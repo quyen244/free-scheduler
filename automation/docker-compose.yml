@@ -244,6 +244,36 @@ services:
               capabilities: [gpu]
     networks: [reup]
 
+  # Local operator UI. It deliberately has no public tunnel mapping and no
+  # metadata-service credentials: it only needs editor assets on the shared
+  # data volume and the internal render-service API.
+  ui:
+    build:
+      context: ..
+      dockerfile: automation/ui/Dockerfile
+    container_name: ui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - *data
+    environment:
+      RENDER_SERVICE_URL: http://render-service:8003
+      PRESET_EDITOR_DATA_DIR: /data/preset-editor
+      NEXTAUTH_URL: http://localhost:3000
+      LOCAL_MODE: "true"
+      NEXT_PUBLIC_LOCAL_MODE: "true"
+    depends_on:
+      render-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [reup]
+
   whisper-transcript-service:
     build: ./whisper-transcript-service
     container_name: whisper-transcript-service

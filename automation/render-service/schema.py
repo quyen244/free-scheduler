@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class VoiceJobRequest(BaseModel):
@@ -37,4 +37,20 @@ class MediaRevisionJobRequest(BaseModel):
     vertical_preset: str = "vertical-clean"
     landscape_preset: str = "yt-landscape"
     metadata_revision_id: str | None = None
+    preset_id: str | None = None
+    preset_revision: int | None = Field(default=None, ge=1)
     callback_url: str | None = None
+
+    @model_validator(mode="after")
+    def editor_preset_pair(self) -> "MediaRevisionJobRequest":
+        if (self.preset_id is None) != (self.preset_revision is None):
+            raise ValueError("preset_id and preset_revision must be supplied together")
+        return self
+
+
+class PresetMattingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preset_id: str
+    host_asset: str
+    corrections: list[dict[str, object]] = Field(default_factory=list, max_length=50)

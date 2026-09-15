@@ -12,6 +12,7 @@ import library
 import manifest
 import render
 import variants
+import visual_preset
 import voice
 from errors import NoChunksError, RenderError
 from shared import callbacks, pipeline_db
@@ -103,10 +104,17 @@ def run_media_revision(
     vertical_preset: str,
     landscape_preset: str,
     metadata_revision_id: str | None,
+    preset_id: str | None = None,
+    preset_revision: int | None = None,
 ) -> None:
     """Build the complete revision and always leave a pollable/callback result."""
     pipeline_db.mark_running(job_id)
     try:
+        editor_preset = (
+            visual_preset.load_published(preset_id, preset_revision)
+            if preset_id is not None and preset_revision is not None
+            else None
+        )
         media_manifest = variants.render_media_revision(
             video_id,
             render_revision,
@@ -114,6 +122,8 @@ def run_media_revision(
             vertical_preset_name=vertical_preset,
             landscape_preset_name=landscape_preset,
             metadata_revision_id=metadata_revision_id,
+            vertical_preset_override=(visual_preset.clean_render_preset(editor_preset, "vertical") if editor_preset else None),
+            landscape_preset_override=(visual_preset.clean_render_preset(editor_preset, "landscape") if editor_preset else None),
             on_progress=lambda done: pipeline_db.set_progress(job_id, done),
         )
     except Exception as exc:  # worker boundary; every failure must call back
@@ -136,6 +146,8 @@ def run_media_revision(
             "encoding": render.encoder_choice().as_dict(),
             "assets": [asset.model_dump(mode="json") for asset in media_manifest.assets],
             "failures": [failure.model_dump(mode="json") for failure in media_manifest.failures],
+            "preset_id": preset_id,
+            "preset_revision": preset_revision,
         }
         if media_manifest.state == "ready":
             pipeline_db.advance_stage(video_id, "rendered")

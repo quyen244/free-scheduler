@@ -1,0 +1,13 @@
+.git
+.next
+node_modules
+.env*
+coverage
+playwright-report
+test-results
+artifacts
+# The UI image only needs its own Dockerfile. Models and pipeline runtime data
+# stay in their dedicated Compose services and shared host volume.
+automation/*
+!automation/ui/
+!automation/ui/Dockerfile

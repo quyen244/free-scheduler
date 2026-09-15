@@ -96,6 +96,32 @@ Last updated: 2026-09-11
 - The operator-facing manual metadata edit surface remains in roadmap Step 5,
   where the app owns review and approval invalidation; it is not part of Step 2.
 
+## Visual presets and host matting
+
+- A visual preset is a versioned, immutable render configuration. It contains
+  only allowlisted asset references and normalized layout values; it never
+  embeds arbitrary filesystem paths or credentials.
+- Operators edit a draft preset in the local UI for both `vertical_9_16`
+  (1080x1920) and `landscape_16_9` (1920x1080). Publishing a draft creates a
+  new numbered preset revision; a published revision is not edited in place.
+- The workflow selects an explicit `preset_id` and `preset_revision`. It must
+  not consume an editor draft or an unversioned "latest" configuration.
+- The render service validates a published preset revision before accepting a
+  job. A visual-preset change is a render-affecting change and therefore
+  requires new assets and a new campaign approval when campaign approval exists.
+- Human host video is processed by Robust Video Matting (RVM MobileNetV3) in
+  the existing GPU render service. The original uploaded host remains
+  immutable; the service writes a derived alpha video and alpha preview. The
+  editor may later add correction masks, but a correction is saved as a new
+  matting revision rather than overwriting the derived alpha.
+- The first editor is local-operator tooling. Its preview is explicitly marked
+  as a preview; render-service/FFmpeg remains the source of truth for the final
+  media assets and media manifest.
+- The editor UI runs as the localhost-only `ui` Docker Compose service. It
+  shares `/data` with the render service and reaches that service only over the
+  internal Compose network; operators do not run Node/npm from Windows or WSL
+  to use the editor.
+
 ## Failure and retention
 
 - Retry transient failures according to error type. After automatic retries are
