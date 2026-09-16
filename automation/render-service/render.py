@@ -348,13 +348,20 @@ def _host_layer(
     slightly worse render but an obviously broken one, and refusing here is
     cheaper than discovering it in a published video.
     """
-    revision = str(host.get("alpha_revision") or "")
-    if not revision:
-        raise RenderError(
-            "the preset places a host but carries no RVM alpha revision; "
-            "run matting and publish a new revision before rendering"
-        )
-    alpha = visual_preset.alpha_mask_path(str(host["preset_id"]), revision)
+    if host.get("path"):
+        # A brand carries the presenter and its mask as two files in its own
+        # folder, already paired at upload time, so there is nothing to resolve.
+        video_path = Path(str(host["path"]))
+        alpha = Path(str(host.get("alpha_path") or ""))
+    else:
+        revision = str(host.get("alpha_revision") or "")
+        if not revision:
+            raise RenderError(
+                "the preset places a host but carries no RVM alpha revision; "
+                "run matting and publish a new revision before rendering"
+            )
+        video_path = library.asset_path(str(host["asset"]))
+        alpha = visual_preset.alpha_mask_path(str(host["preset_id"]), revision)
     if not alpha.is_file():
         raise RenderError(f"host alpha mask is missing at {alpha}")
 
@@ -364,7 +371,7 @@ def _host_layer(
         # Looped, so a host shorter than the chunk keeps presenting instead of
         # freezing on its last frame for the remainder.
         "-stream_loop", "-1", "-t", f"{duration_s:.3f}",
-        "-i", str(library.asset_path(str(host["asset"]))),
+        "-i", str(video_path),
         "-stream_loop", "-1", "-t", f"{duration_s:.3f}",
         "-i", str(alpha),
     ]
@@ -374,6 +381,34 @@ def _host_layer(
         "[hostrgb][hostalpha]alphamerge[hostrgba]",
     ]
     return args, steps, f"overlay={box.x}:{box.y}:eof_action=pass"
+
+
+def _image_layer(
+    image: dict, geometry: presets.Geometry, duration_s: float, index: int
+) -> tuple[list[str], list[str], str, str]:
+    """One still placed in its own rectangle on the canvas.
+
+    A brand's background, logo and watermark are all this: the old schema gave
+    each its own named slot and its own code path, which is why adding a fourth
+    still meant editing the renderer. Here they differ only by rectangle and z.
+    """
+    box = _canvas_box(image, geometry.canvas_w, geometry.canvas_h)
+    label = f"img{index}"
+    args = ["-loop", "1", "-t", f"{duration_s:.3f}", "-i", str(image["path"])]
+    opacity = float(image.get("opacity", 1.0))
+    if str(image.get("fit", "contain")) == "fill":
+        scale = f"scale={box.w}:{box.h}"
+        placement = f"{box.x}:{box.y}"
+    else:
+        # Fitted inside the rectangle and centred in it, so a logo keeps its
+        # own aspect ratio no matter what shape the operator drags around it.
+        scale = f"scale={box.w}:{box.h}:force_original_aspect_ratio=decrease"
+        placement = f"{box.x}+({box.w}-w)/2:{box.y}+({box.h}-h)/2"
+    steps = [
+        f"[{index}:v]{scale},setsar=1,format=rgba,"
+        f"colorchannelmixer=aa={opacity}[{label}]"
+    ]
+    return args, steps, label, f"overlay={placement}"
 
 
 def compose_clean(
@@ -422,8 +457,28 @@ def compose_clean(
         )
     sequence += 1
 
+    # Stills a brand places itself: background, logo, watermark, or anything
+    # else it uploaded. Each is an ordinary z-sorted layer, which is what lets
+    # an operator put a frame over the footage and the logo under it.
+    for image in preset.get("images") or []:
+        index = _FIRST_OPTIONAL_INPUT + extra_inputs.count("-i")
+        args, image_steps, label, overlay = _image_layer(
+            image, geometry, duration_s, index
+        )
+        extra_inputs.extend(args)
+        steps.extend(image_steps)
+        layers.append(
+            (
+                int(image.get("z", 10)),
+                sequence,
+                f"img{index}",
+                f"[{label}]{overlay}",
+            )
+        )
+        sequence += 1
+
     host = preset.get("host")
-    if host and host.get("asset"):
+    if host and (host.get("asset") or host.get("path")):
         first_input = _FIRST_OPTIONAL_INPUT + extra_inputs.count("-i")
         args, host_steps, overlay = _host_layer(host, geometry, duration_s, first_input)
         extra_inputs.extend(args)
@@ -477,7 +532,10 @@ def compose_clean(
         sequence += 1
 
     subtitle = preset.get("subtitle") or {}
-    if subtitle.get("visible", True):
+    # `and subtitle`, not just the visible flag: a brand that placed no
+    # subtitle layer sends nothing here, and an empty dict defaulting to
+    # visible would burn subtitles into a layout that never asked for them.
+    if subtitle and subtitle.get("visible", True):
         layers.append(
             (int(subtitle.get("z", 60)), sequence, "subs", f"ass={subtitle_name}")
         )
@@ -860,6 +918,176 @@ def render_clean_vertical(
         "clean_vertical",
         content_item_id,
         expected_duration_s=duration_s,
+        warnings=[*(warnings or []), *composed_warnings],
+    )
+
+
+def _music_graph(music: dict, duration_s: float, music_input: int) -> str:
+    """Mix the brand's bed under the voice, ducked by the voice itself.
+
+    The clean path has no music because a clean master is shared; here the bed
+    belongs to the brand and the render is already brand-specific, so the mix
+    happens in the same pass rather than in a second encode.
+    """
+    fade_in = min(float(music.get("fade_in_s", 0.0)), duration_s / 2)
+    fade_out = min(float(music.get("fade_out_s", 0.0)), duration_s / 2)
+    fade_out_start = max(duration_s - fade_out, 0)
+    ducking = music.get("ducking") or {}
+    stereo = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+    return (
+        f"[{_VOICE_INPUT}:a]{stereo},asetpts=PTS-STARTPTS,apad,"
+        f"atrim=0:{duration_s:.3f},asplit=2[speech][sidechain];"
+        f"[{music_input}:a]{stereo},volume={float(music['volume_db'])}dB,"
+        f"atrim=0:{duration_s:.3f},"
+        f"afade=t=in:st=0:d={fade_in:.3f},"
+        f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f},"
+        "asetpts=PTS-STARTPTS[music];"
+        f"[music][sidechain]sidechaincompress="
+        f"threshold={float(ducking.get('threshold', 0.02)):.6f}:"
+        f"ratio={float(ducking.get('ratio', 8)):.3f}:"
+        f"attack={float(ducking.get('attack_ms', 20)):.3f}:"
+        f"release={float(ducking.get('release_ms', 450)):.3f}[ducked];"
+        "[speech][ducked]amix=inputs=2:duration=first:dropout_transition=0:"
+        "normalize=0,alimiter=limit=0.98[aout]"
+    )
+
+
+def render_brand_variant(
+    video_id: str,
+    render_revision: int,
+    config: dict,
+    brand_id: str,
+    segments: list[dict],
+    *,
+    chunk: dict | None = None,
+    fields: dict[str, str] | None = None,
+    texts: dict[str, str] | None = None,
+    warnings: list[str] | None = None,
+) -> manifests.MediaAsset:
+    """Render one delivery asset straight from the source for one brand.
+
+    A `brand.v1` layout owns the rectangle the footage sits in, the blur
+    regions and the subtitle, so there is no brand-neutral master to derive
+    from: everything this brand asked for is composited in a single pass.
+    `chunk` is `None` for the whole 16:9 asset and a chunk row for a 9:16 part.
+    """
+    whole = chunk is None
+    role: manifests.AssetRole = "branded_whole" if whole else "branded_vertical"
+    expected_canvas = (1920, 1080) if whole else (1080, 1920)
+    canvas = config.get("canvas") or {}
+    if (int(canvas.get("w", 0)), int(canvas.get("h", 0))) != expected_canvas:
+        raise RenderError(
+            f"{brand_id}/{role} needs a {expected_canvas[0]}x{expected_canvas[1]} "
+            "canvas; the layout for that aspect does not have one"
+        )
+
+    raw = library.raw_path(video_id)
+    voice = library.load_voice_track(video_id)
+    source = probe(raw)
+
+    if whole:
+        content_item_id = manifests.WHOLE_ITEM
+        start_s, duration_s = 0.0, source.duration_s
+        within = segments
+        stem = "whole-16x9"
+    else:
+        idx = int(chunk["idx"])
+        content_item_id = str(chunk.get("name") or f"part_{idx + 1}")
+        expected_name = f"part_{idx + 1}"
+        if content_item_id != expected_name:
+            raise RenderError(
+                f"chunk index {idx} must be named {expected_name!r}, not {content_item_id!r}"
+            )
+        start_s = float(chunk["start_s"])
+        duration_s = float(chunk["end_s"]) - start_s
+        if duration_s <= 0:
+            raise RenderError(f"{content_item_id} has a non-positive duration")
+        within = segments_within(segments, start_s, duration_s + start_s)
+        stem = f"{content_item_id}-9x16"
+        fields = {"part": str(idx + 1), **(fields or {})}
+
+    output = manifests.expected_asset_path(
+        video_id, render_revision, role, content_item_id, brand_id
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    # Only a layout that placed a subtitle layer gets a script; `compose_clean`
+    # leaves the `ass=` filter out entirely when the brand placed none.
+    subtitle_name = f"{content_item_id}.subs.ass"
+    if config.get("subtitle"):
+        subs.write(
+            output.parent / subtitle_name,
+            subs.build(within, config["subtitle"], *expected_canvas, start_s),
+        )
+
+    geometry = presets.resolve(config, source.width, source.height)
+    video_graph, extra_inputs, composed_warnings = compose_clean(
+        config,
+        geometry,
+        source,
+        output.parent,
+        stem,
+        subtitle_name,
+        duration_s,
+        fields=fields,
+        texts=texts,
+    )
+
+    music = config.get("signature_music")
+    music_inputs: list[str] = []
+    if music:
+        # Appended last so the indices `compose_clean` already handed out to
+        # the brand's own stills stay correct.
+        music_index = _FIRST_OPTIONAL_INPUT + extra_inputs.count("-i")
+        music_inputs = ["-stream_loop", "-1", "-i", str(music["path"])]
+        audio_graph = _music_graph(music, duration_s, music_index)
+    else:
+        audio_graph = f"[{_VOICE_INPUT}:a]apad[aout]"
+
+    span = ["-ss", f"{start_s:.3f}", "-t", f"{duration_s:.3f}"] if not whole else []
+    encode = config.get("encode") or {}
+    partial = output.with_name(f".{stem}.part.mp4")
+    command = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        *span, "-i", str(raw),
+        *_background_args(config, geometry, duration_s),
+        *span, "-i", str(voice),
+        *extra_inputs,
+        *music_inputs,
+        "-filter_complex", f"{video_graph};{audio_graph}",
+        "-map", "[vout]",
+        "-map", "[aout]",
+        *_encode_args(encode),
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", str(encode.get("abr", "192k" if whole else "128k")),
+        "-t", f"{duration_s:.3f}",
+        "-movflags", "+faststart",
+        str(partial),
+    ]
+    try:
+        _run_encode(
+            command,
+            stage=role,
+            content_item_id=content_item_id,
+            media_duration_s=duration_s,
+            cwd=output.parent,
+        )
+    except subprocess.CalledProcessError as exc:
+        partial.unlink(missing_ok=True)
+        raise RenderError(
+            f"brand render of {video_id}/{content_item_id} for {brand_id}: "
+            f"{exc.stderr.strip()[-800:]}"
+        ) from exc
+
+    partial.replace(output)
+    return manifests.inspect_expected_asset(
+        video_id,
+        render_revision,
+        role,
+        content_item_id,
+        expected_duration_s=duration_s,
+        brand_id=brand_id,
         warnings=[*(warnings or []), *composed_warnings],
     )
 

@@ -234,6 +234,15 @@
       "title": "State",
       "type": "string"
     },
+    "topology": {
+      "default": "clean_lineage",
+      "enum": [
+        "clean_lineage",
+        "brand_owned"
+      ],
+      "title": "Topology",
+      "type": "string"
+    },
     "chunk_names": {
       "items": {
         "type": "string"
@@ -247,6 +256,13 @@
       },
       "title": "Brand Ids",
       "type": "array"
+    },
+    "brand_revisions": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Brand Revisions",
+      "type": "object"
     },
     "assets": {
       "items": {

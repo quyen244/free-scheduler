@@ -106,26 +106,38 @@ def run_media_revision(
     metadata_revision_id: str | None,
     preset_id: str | None = None,
     preset_revision: int | None = None,
+    brand_revisions: dict[str, int] | None = None,
 ) -> None:
     """Build the complete revision and always leave a pollable/callback result."""
     pipeline_db.mark_running(job_id)
     try:
-        editor_preset = (
-            visual_preset.load_published(preset_id, preset_revision)
-            if preset_id is not None and preset_revision is not None
-            else None
-        )
-        media_manifest = variants.render_media_revision(
-            video_id,
-            render_revision,
-            brand_ids=brand_ids,
-            vertical_preset_name=vertical_preset,
-            landscape_preset_name=landscape_preset,
-            metadata_revision_id=metadata_revision_id,
-            vertical_preset_override=(visual_preset.clean_render_preset(editor_preset, "vertical") if editor_preset else None),
-            landscape_preset_override=(visual_preset.clean_render_preset(editor_preset, "landscape") if editor_preset else None),
-            on_progress=lambda done: pipeline_db.set_progress(job_id, done),
-        )
+        if brand_revisions:
+            # Brand-owned: every brand renders its own layout from the source,
+            # so there are no clean masters and no library preset to pick.
+            media_manifest = variants.render_brand_revision(
+                video_id,
+                render_revision,
+                brand_revisions=brand_revisions,
+                metadata_revision_id=metadata_revision_id,
+                on_progress=lambda done: pipeline_db.set_progress(job_id, done),
+            )
+        else:
+            editor_preset = (
+                visual_preset.load_published(preset_id, preset_revision)
+                if preset_id is not None and preset_revision is not None
+                else None
+            )
+            media_manifest = variants.render_media_revision(
+                video_id,
+                render_revision,
+                brand_ids=brand_ids,
+                vertical_preset_name=vertical_preset,
+                landscape_preset_name=landscape_preset,
+                metadata_revision_id=metadata_revision_id,
+                vertical_preset_override=(visual_preset.clean_render_preset(editor_preset, "vertical") if editor_preset else None),
+                landscape_preset_override=(visual_preset.clean_render_preset(editor_preset, "landscape") if editor_preset else None),
+                on_progress=lambda done: pipeline_db.set_progress(job_id, done),
+            )
     except Exception as exc:  # worker boundary; every failure must call back
         logger.exception("media revision job %s failed", job_id)
         pipeline_db.finish_job(job_id, "failed", error=f"{type(exc).__name__}: {exc}")
@@ -148,6 +160,8 @@ def run_media_revision(
             "failures": [failure.model_dump(mode="json") for failure in media_manifest.failures],
             "preset_id": preset_id,
             "preset_revision": preset_revision,
+            "topology": media_manifest.topology,
+            "brand_revisions": media_manifest.brand_revisions,
         }
         if media_manifest.state == "ready":
             pipeline_db.advance_stage(video_id, "rendered")

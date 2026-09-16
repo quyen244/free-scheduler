@@ -3,12 +3,14 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import BackgroundTasks, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 import jobs
 import matting
 import matting_jobs
 import brand
+import brand_assets
+import brands
 import library
 import render
 import visual_preset
@@ -138,6 +140,112 @@ def get_matting_job(job_id: str) -> dict[str, object]:
     return matting_jobs.read(job_id)
 
 
+# ---------------------------------------------------------------------------
+# brands: artwork and layout in one folder, which is what a render loops over
+# ---------------------------------------------------------------------------
+
+
+@app.get("/brands")
+def list_brand_configs() -> dict[str, object]:
+    return {"brands": brands.list_brands()}
+
+
+@app.post("/brands", status_code=201)
+def create_brand(payload: dict[str, object]) -> dict[str, object]:
+    created = brands.create(
+        str(payload.get("brand_id") or ""), str(payload.get("display_name") or "")
+    )
+    return created.model_dump(mode="json", exclude_none=True)
+
+
+@app.get("/brands/{brand_id}/draft")
+def get_brand_draft(brand_id: str) -> dict[str, object]:
+    return brands.load_draft(brand_id).model_dump(mode="json", exclude_none=True)
+
+
+@app.post("/brands/{brand_id}/draft")
+def save_brand_draft(brand_id: str, payload: dict[str, object]) -> dict[str, object]:
+    if str(payload.get("brand_id")) != brand_id:
+        raise RenderError("the draft body must carry the brand id it is saved under")
+    return brands.save_draft(payload).model_dump(mode="json", exclude_none=True)
+
+
+@app.post("/brands/{brand_id}/publish")
+def publish_brand(brand_id: str, payload: dict[str, object]) -> dict[str, object]:
+    if str(payload.get("brand_id")) != brand_id:
+        raise RenderError("the draft body must carry the brand id it is published under")
+    return brands.publish(payload).model_dump(mode="json", exclude_none=True)
+
+
+@app.get("/brands/{brand_id}/revisions/{revision}")
+def get_brand_revision(brand_id: str, revision: int) -> dict[str, object]:
+    return brands.load_published(brand_id, revision).model_dump(
+        mode="json", exclude_none=True
+    )
+
+
+@app.get("/brands/{brand_id}/render-config/{revision}/{aspect}")
+def get_brand_render_config(brand_id: str, revision: int, aspect: str) -> dict[str, object]:
+    """What the renderer will actually receive. Useful for verifying a layout."""
+    if aspect not in ("vertical", "landscape"):
+        raise RenderError("aspect must be 'vertical' or 'landscape'")
+    return brands.render_config(brands.load_published(brand_id, revision), aspect)  # type: ignore[arg-type]
+
+
+@app.post("/brands/{brand_id}/assets", status_code=201)
+async def upload_brand_asset(
+    brand_id: str,
+    request: Request,
+    asset_id: str,
+    filename: str,
+    role: str = "other",
+) -> dict[str, object]:
+    """Store one uploaded file. The caller then places it as a layer.
+
+    The body is the raw bytes rather than a multipart form: multipart would
+    pull `python-multipart` into the image for a single endpoint that only ever
+    carries one file, and the browser can post a File object directly.
+
+    Deliberately does not touch the draft: a file on disk that no layer points
+    at is harmless, whereas a draft pointing at a file that failed to write is
+    a publish that fails much later for a reason nobody can see.
+    """
+    body = await request.body()
+    try:
+        return brand_assets.store(brand_id, asset_id, filename, body, role)
+    except ValueError as exc:
+        # The caller sent an empty body or a file type no layer can use. That
+        # is their mistake to fix, not an upstream failure, so it answers 422
+        # rather than the 502 a RenderError would produce.
+        raise BrandConfigError(str(exc)) from exc
+
+
+@app.get("/brands/{brand_id}/assets/{filename}")
+def read_brand_asset(brand_id: str, filename: str) -> FileResponse:
+    path = brands.asset_file(brand_id, filename)
+    if not path.is_file():
+        raise PresetNotFoundError(f"no such brand asset: {filename}")
+    return FileResponse(path)
+
+
+@app.post("/brands/{brand_id}/matting")
+def mat_brand_host(brand_id: str, payload: dict[str, object]) -> dict[str, object]:
+    """Matte a presenter video that is already stored in this brand.
+
+    Synchronous: the alpha mask has to land beside its video before the asset
+    record can name both, and there is nothing for the editor to draw until it
+    does.
+    """
+    try:
+        return brand_assets.mat_host(
+            brand_id,
+            str(payload.get("file") or ""),
+            list(payload.get("corrections") or []),
+        )
+    except FileNotFoundError as exc:
+        raise PresetNotFoundError(str(exc)) from exc
+
+
 @app.post("/voice/jobs", response_model=JobAccepted, status_code=202)
 def create_voice_job(request: VoiceJobRequest, background: BackgroundTasks) -> JobAccepted:
     # Both checked here rather than in the worker: an unknown voice and an
@@ -173,7 +281,15 @@ def create_render_job(request: RenderJobRequest, background: BackgroundTasks) ->
 def create_media_revision_job(
     request: MediaRevisionJobRequest, background: BackgroundTasks
 ) -> JobAccepted:
-    if request.preset_id is not None:
+    if request.brand_revisions is not None:
+        # Every named brand revision is resolved to a render config here, so a
+        # draft, a missing file or a layout with no visible footage answers the
+        # caller now instead of failing a background job minutes later.
+        for brand_id, brand_revision in request.brand_revisions.items():
+            published = brands.load_published(brand_id, brand_revision)
+            for aspect in ("landscape", "vertical"):
+                brands.render_config(published, aspect)
+    elif request.preset_id is not None:
         # Published editor config is validated (including allowlisted assets)
         # before a job row exists. A malformed revision is caller input, not a
         # background failure that n8n must wait to discover.
@@ -187,8 +303,9 @@ def create_media_revision_job(
             f"no chunks for {request.video_id!r} — POST it to the transcript "
             "service's /chunk first"
         )
-    for brand_id in request.brand_ids:
-        brand.load(brand_id)
+    if request.brand_revisions is None:
+        for brand_id in request.brand_ids:
+            brand.load(brand_id)
 
     job_id = pipeline_db.create_job(
         request.video_id, "media_revision", request.callback_url
@@ -204,6 +321,7 @@ def create_media_revision_job(
         request.metadata_revision_id,
         request.preset_id,
         request.preset_revision,
+        request.brand_revisions,
     )
     return JobAccepted(job_id=job_id, video_id=request.video_id, state="queued")
 

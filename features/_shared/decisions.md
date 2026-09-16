@@ -1,6 +1,6 @@
 # Confirmed product decisions
 
-Last updated: 2026-09-11
+Last updated: 2026-09-16
 
 ## Source input
 
@@ -96,7 +96,50 @@ Last updated: 2026-09-11
 - The operator-facing manual metadata edit surface remains in roadmap Step 5,
   where the app owns review and approval invalidation; it is not part of Step 2.
 
-## Visual presets and host matting
+## Brand-owned layouts (supersedes the visual-preset split)
+
+- A brand owns its complete visual layout. `automation/data/presets/brand/<id>/`
+  holds one `config.json` plus that brand's own uploaded files in `assets/`.
+  The separate "visual preset" object is no longer the unit an operator edits.
+- A layout is a z-ordered list of layers on an initially empty canvas for each
+  ratio (`vertical_9_16` 1080x1920 and `landscape_16_9` 1920x1080). Layer kinds
+  are `image`, `main_video`, `blur`, `host`, `text`, and `subtitle`. A new brand
+  starts as a black canvas with no layers; every layer present was placed by an
+  operator.
+- The presenter (host) video belongs to the brand, not to a shared preset. Each
+  brand uploads its own presenter and RVM matting runs once at upload, storing a
+  derived alpha video beside the original. The original stays immutable.
+- Publishing a brand draft creates a numbered, immutable revision carrying a
+  `content_sha256`. A draft is never a valid render input.
+- Because a brand owns the footage rectangle, the blur regions, and the
+  subtitle, brands no longer share a clean master. A brand-owned revision
+  renders every delivery asset once, directly from the source, per brand. This
+  replaces the earlier "render reusable clean masters first, then derive
+  branded variants" rule for brand-owned renders; see the topology decision
+  below.
+- The old `presets/preset-editor/` and `presets/brand-assets/` data is retained
+  as history. It is migrated, not deleted.
+
+## Render topology
+
+- A media manifest declares its `topology` explicitly.
+- `clean_lineage` is the original two-stage topology: one `clean_whole`, `N`
+  `clean_vertical`, and per brand one `branded_whole` and `N` `branded_vertical`
+  whose `lineage_asset_id` points at the clean master they derive from. It
+  remains supported for the legacy library presets and mock brand profiles.
+- `brand_owned` is the single-pass topology for `brand.v1` layouts: per brand
+  one `branded_whole` and `N` `branded_vertical` rendered straight from the
+  source, with no clean assets and no lineage. A brand-owned manifest records
+  `brand_revisions` so the exact published brand revision behind every asset is
+  auditable and an approval can be invalidated when a brand is republished.
+- A brand-owned render job must name an explicit brand revision per brand. It
+  must not consume a draft or an unversioned "latest" configuration, for the
+  same reason a visual preset could not.
+- The expected asset count per source is unchanged from the delivery contract:
+  a `brand_owned` revision still produces `brands * (1 + N)` delivery assets.
+  Only the intermediate clean masters disappear.
+
+## Visual presets and host matting (historical; superseded by brand-owned layouts)
 
 - A visual preset is a versioned, immutable render configuration. It contains
   only allowlisted asset references and normalized layout values; it never

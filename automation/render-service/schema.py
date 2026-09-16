@@ -39,12 +39,27 @@ class MediaRevisionJobRequest(BaseModel):
     metadata_revision_id: str | None = None
     preset_id: str | None = None
     preset_revision: int | None = Field(default=None, ge=1)
+    # Supplying this selects the brand-owned topology: each named brand renders
+    # its own published layout straight from the source. The revision is named
+    # explicitly for the same reason a preset revision is — a draft or a
+    # floating "latest" is never a valid render input.
+    brand_revisions: dict[str, int] | None = Field(default=None, max_length=10)
     callback_url: str | None = None
 
     @model_validator(mode="after")
     def editor_preset_pair(self) -> "MediaRevisionJobRequest":
         if (self.preset_id is None) != (self.preset_revision is None):
             raise ValueError("preset_id and preset_revision must be supplied together")
+        if self.brand_revisions is not None:
+            if not self.brand_revisions:
+                raise ValueError("brand_revisions must name at least one brand")
+            if any(revision < 1 for revision in self.brand_revisions.values()):
+                raise ValueError("a brand revision is a positive integer")
+            if self.preset_id is not None:
+                raise ValueError(
+                    "a brand-owned render owns its own layout; it cannot also "
+                    "take a visual preset"
+                )
         return self
 
 

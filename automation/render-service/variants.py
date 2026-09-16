@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import brand
+import brands as brand_layouts
 import library
 import manifest
 import render
@@ -274,6 +275,179 @@ def render_media_revision(
         warnings=[
             "mock brand assets are for pipeline verification only; replace them before publishing"
         ],
+    )
+    manifest.write_manifest(result)
+    return result
+
+
+def render_brand_revision(
+    video_id: str,
+    render_revision: int,
+    *,
+    brand_revisions: dict[str, int],
+    metadata_revision_id: str | None = None,
+    on_progress: Progress | None = None,
+) -> manifest.MediaManifest:
+    """Render or resume one revision from published `brand.v1` layouts.
+
+    The loop the brand-owned topology asks for: for every brand, take that
+    brand's own published layout and its own files and render the whole 16:9
+    asset plus every 9:16 chunk straight from the source. Nothing is shared
+    between brands, so a brand that fails leaves the others intact.
+    """
+    brand_ids = sorted(brand_revisions)
+    if not brand_ids:
+        raise RenderError("brand_revisions must name at least one brand")
+
+    chunks = library_chunks(video_id)
+    chunk_names = [str(chunk["name"]) for chunk in chunks]
+    expected_names = [f"part_{index}" for index in range(1, len(chunks) + 1)]
+    if chunk_names != expected_names:
+        raise RenderError(
+            f"chunk names must be contiguous {expected_names}, got {chunk_names}"
+        )
+
+    revision_path = manifest.manifest_revision_path(video_id, render_revision)
+    if revision_path.is_file():
+        existing = manifest.MediaManifest.model_validate_json(
+            revision_path.read_text(encoding="utf-8")
+        )
+        if (
+            existing.topology != "brand_owned"
+            or existing.chunk_names != chunk_names
+            or existing.brand_revisions != brand_revisions
+            or existing.metadata_revision_id != metadata_revision_id
+        ):
+            raise manifest.ManifestConflictError(
+                f"ready render revision {render_revision} already exists with different inputs"
+            )
+        if on_progress:
+            on_progress(1.0)
+        return existing
+
+    # Resolve every layout before encoding anything. A brand pointing at a
+    # missing file or carrying no visible footage layer is a configuration
+    # mistake, and it should surface now rather than after the first brand has
+    # already cost minutes of GPU time.
+    configs: dict[str, dict[str, dict]] = {}
+    for brand_id, brand_revision in sorted(brand_revisions.items()):
+        published = brand_layouts.load_published(brand_id, brand_revision)
+        configs[brand_id] = {
+            aspect: brand_layouts.render_config(published, aspect)
+            for aspect in ("landscape", "vertical")
+        }
+
+    transcript = library.load_transcript(video_id)
+    segments = transcript.get("segments") or []
+    voice_manifest = library.load_voice_manifest(video_id) or {}
+    source = render.probe(library.raw_path(video_id))
+
+    from shared import pipeline_db
+
+    fields = {"title": pipeline_db.title_for(video_id)}
+    base_warnings = list(voice_manifest.get("warnings") or [])
+
+    total_assets = (1 + len(chunks)) * len(brand_ids)
+    completed = 0
+    assets: list[manifest.MediaAsset] = []
+    failures: list[manifest.ManifestFailure] = []
+
+    def progressed() -> None:
+        nonlocal completed
+        completed += 1
+        if on_progress:
+            on_progress(completed / total_assets)
+
+    for brand_id in brand_ids:
+        landscape = configs[brand_id]["landscape"]
+        vertical = configs[brand_id]["vertical"]
+        try:
+            assets.append(
+                _reuse_or_render(
+                    video_id=video_id,
+                    render_revision=render_revision,
+                    role="branded_whole",
+                    content_item_id=manifest.WHOLE_ITEM,
+                    expected_duration_s=source.duration_s,
+                    brand_id=brand_id,
+                    build=lambda brand_id=brand_id, landscape=landscape: render.render_brand_variant(
+                        video_id,
+                        render_revision,
+                        landscape,
+                        brand_id,
+                        segments,
+                        fields=fields,
+                        warnings=base_warnings,
+                    ),
+                )
+            )
+        except Exception as exc:  # one bad asset must not discard successful peers
+            failures.append(
+                _failure(
+                    video_id,
+                    render_revision,
+                    "branded_whole",
+                    manifest.WHOLE_ITEM,
+                    brand_id,
+                    exc,
+                )
+            )
+        progressed()
+
+        for chunk in chunks:
+            name = str(chunk["name"])
+            duration_s = float(chunk["end_s"]) - float(chunk["start_s"])
+            try:
+                assets.append(
+                    _reuse_or_render(
+                        video_id=video_id,
+                        render_revision=render_revision,
+                        role="branded_vertical",
+                        content_item_id=name,
+                        expected_duration_s=duration_s,
+                        brand_id=brand_id,
+                        build=lambda chunk=chunk, brand_id=brand_id, vertical=vertical: render.render_brand_variant(
+                            video_id,
+                            render_revision,
+                            vertical,
+                            brand_id,
+                            segments,
+                            chunk=chunk,
+                            fields=fields,
+                            texts={
+                                "caption_top": str(chunk.get("hook") or ""),
+                                "caption_bottom": str(chunk.get("caption") or ""),
+                            },
+                            warnings=base_warnings,
+                        ),
+                    )
+                )
+            except Exception as exc:
+                failures.append(
+                    _failure(
+                        video_id,
+                        render_revision,
+                        "branded_vertical",
+                        name,
+                        brand_id,
+                        exc,
+                    )
+                )
+            progressed()
+
+    state: manifest.ManifestState = "needs_action" if failures else "ready"
+    result = manifest.MediaManifest(
+        video_id=video_id,
+        render_revision=render_revision,
+        metadata_revision_id=metadata_revision_id,
+        source_sha256=manifest.sha256_file(library.raw_path(video_id)),
+        state=state,
+        topology="brand_owned",
+        chunk_names=chunk_names,
+        brand_ids=brand_ids,
+        brand_revisions=brand_revisions,
+        assets=assets,
+        failures=failures,
     )
     manifest.write_manifest(result)
     return result

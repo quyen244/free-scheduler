@@ -33,6 +33,11 @@ AssetRole = Literal[
     "branded_vertical",
 ]
 ManifestState = Literal["building", "validating", "ready", "needs_action", "stale"]
+# How the delivery assets in a manifest were produced. `clean_lineage` renders
+# brand-neutral masters once and dresses them per brand. `brand_owned` renders
+# each brand straight from the source, because a `brand.v1` layout owns the
+# footage rectangle, the blur regions and the subtitle and so cannot share one.
+Topology = Literal["clean_lineage", "brand_owned"]
 
 _BRAND_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _PART_PATTERN = re.compile(r"^part_([1-9][0-9]*)$")
@@ -94,9 +99,10 @@ class MediaAsset(StrictModel):
             raise ValueError("delivery assets require H.264 video and AAC audio")
 
         if branded:
+            # Lineage is required by the `clean_lineage` topology check rather
+            # than here: a brand-owned asset has no clean master to point at,
+            # and inventing one would be a lie in the audit trail.
             _validate_brand_id(self.brand_id)
-            if self.lineage_asset_id is None:
-                raise ValueError("branded assets require clean-master lineage")
         elif self.brand_id is not None or self.lineage_asset_id is not None:
             raise ValueError("clean assets cannot carry brand or lineage fields")
         return self
@@ -116,8 +122,13 @@ class MediaManifest(StrictModel):
     metadata_revision_id: str | None = None
     source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     state: ManifestState
+    topology: Topology = "clean_lineage"
     chunk_names: list[str]
     brand_ids: list[str]
+    # Only meaningful for `brand_owned`: the published brand revision behind
+    # every asset of that brand, so republishing a brand is visibly a different
+    # render and can invalidate an approval.
+    brand_revisions: dict[str, int] = Field(default_factory=dict)
     assets: list[MediaAsset]
     failures: list[ManifestFailure] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -134,6 +145,15 @@ class MediaManifest(StrictModel):
             raise ValueError("brand_ids must be unique")
         for brand_id in self.brand_ids:
             _validate_brand_id(brand_id)
+        if self.topology == "brand_owned":
+            if sorted(self.brand_revisions) != sorted(self.brand_ids):
+                raise ValueError(
+                    "a brand-owned manifest must name one published revision per brand"
+                )
+            if any(revision < 1 for revision in self.brand_revisions.values()):
+                raise ValueError("brand revisions are positive integers")
+        elif self.brand_revisions:
+            raise ValueError("brand_revisions belongs to the brand-owned topology")
 
         asset_ids = [asset.asset_id for asset in self.assets]
         paths = [asset.path for asset in self.assets]
@@ -170,8 +190,10 @@ class MediaManifest(StrictModel):
         return self
 
     def _validate_ready_topology(self) -> None:
-        expected = {("clean_whole", WHOLE_ITEM, None)}
-        expected.update(("clean_vertical", part, None) for part in self.chunk_names)
+        expected: set[tuple[str, str, str | None]] = set()
+        if self.topology == "clean_lineage":
+            expected.add(("clean_whole", WHOLE_ITEM, None))
+            expected.update(("clean_vertical", part, None) for part in self.chunk_names)
         for brand_id in self.brand_ids:
             expected.add(("branded_whole", WHOLE_ITEM, brand_id))
             expected.update(
@@ -189,6 +211,19 @@ class MediaManifest(StrictModel):
                 f"ready topology mismatch; missing={missing}, unexpected={unexpected}"
             )
 
+        if self.topology == "brand_owned":
+            # Nothing was derived, so nothing may claim to be. The set check
+            # above already rejected clean assets by excluding them from
+            # `expected`; this catches an invented lineage on a branded asset.
+            dangling = sorted(
+                asset.asset_id for asset in self.assets if asset.lineage_asset_id
+            )
+            if dangling:
+                raise ValueError(
+                    f"brand-owned assets have no clean master to reference: {dangling}"
+                )
+            return
+
         by_identity = {
             (asset.role, asset.content_item_id, asset.brand_id): asset
             for asset in self.assets
@@ -203,6 +238,10 @@ class MediaManifest(StrictModel):
                 )
                 branded = by_identity[(branded_role, content_item_id, brand_id)]
                 clean = by_identity[(clean_role, content_item_id, None)]
+                if branded.lineage_asset_id is None:
+                    raise ValueError(
+                        f"{branded.asset_id} requires clean-master lineage"
+                    )
                 if branded.lineage_asset_id != clean.asset_id:
                     raise ValueError(
                         f"{branded.asset_id} must reference clean asset {clean.asset_id}"
