@@ -152,3 +152,91 @@ def test_a_brand_host_without_its_mask_on_disk_is_refused(tmp_path):
 def test_a_layout_that_draws_nothing_says_so(tmp_path):
     _, _, warnings = _compose(_config(video_visible=False), tmp_path)
     assert any("no visible layer" in warning for warning in warnings)
+
+
+# ---------------------------------------------------------------------------
+# blur regions that take part in the stack
+# ---------------------------------------------------------------------------
+
+# The footage lands at 0,656 1080x608 for the fixture's video_rect, so a blur
+# at 0.1/0.8 of the source is 108,1142 432x72 on the canvas. Written out rather
+# than recomputed, so a change in the mapping fails here instead of agreeing
+# with itself.
+BLUR = {"id": "plate", "x": 0.1, "y": 0.8, "w": 0.4, "h": 0.12, "z": 35}
+BLUR_CROP = "crop=432:72:108:1142"
+
+
+def _composited(graph, fragment):
+    """Where one layer's compositing step sits in the finished graph."""
+    assert fragment in graph, graph
+    return graph.index(fragment)
+
+
+def test_a_blur_with_a_z_is_composited_at_that_z(tmp_path):
+    """Between the logo under it and the watermark over it, not before both."""
+    config = _config(
+        images=[_image("logo", 30, w=0.2, h=0.1), _image("wm", 40, w=0.2, h=0.1)],
+        blur_layers=[BLUR],
+    )
+    graph, _, warnings = _compose(config, tmp_path)
+
+    assert not warnings
+    # vid(10) -> logo(30) -> blur(35) -> watermark(40). The scale step that
+    # defines each image label comes earlier and in input order, which is why
+    # the overlay step is what gets measured.
+    assert (
+        _composited(graph, "[vid]overlay")
+        < _composited(graph, "[img3]overlay")
+        < _composited(graph, BLUR_CROP)
+        < _composited(graph, "[img4]overlay")
+    ), graph
+
+
+def test_a_blur_below_the_logo_does_not_blur_the_logo(tmp_path):
+    config = _config(
+        images=[_image("logo", 30, w=0.2, h=0.1)],
+        blur_layers=[{**BLUR, "z": 11}],
+    )
+    graph, _, _ = _compose(config, tmp_path)
+    assert _composited(graph, BLUR_CROP) < _composited(graph, "[img3]overlay"), graph
+
+
+def test_a_blur_on_top_still_closes_the_graph(tmp_path):
+    """The last step is rewritten to [vout]; a three-step layer must survive it."""
+    config = _config(
+        images=[_image("logo", 30, w=0.2, h=0.1)], blur_layers=[{**BLUR, "z": 99}]
+    )
+    graph, _, _ = _compose(config, tmp_path)
+
+    assert graph.count("[vout]") == 1
+    assert graph.split(";")[-1].endswith("[vout]")
+    assert "overlay=108:1142[vout]" in graph, graph
+
+
+def test_a_blur_without_a_z_is_still_burned_into_the_source(tmp_path):
+    """The pre-stacking meaning, which published revisions were approved with."""
+    config = _config(
+        blur_regions=[{"x": 0.1, "y": 0.8, "w": 0.4, "h": 0.12}],
+        images=[_image("logo", 30, w=0.2, h=0.1)],
+    )
+    graph, _, _ = _compose(config, tmp_path)
+
+    # Applied to the source input, in source pixels, before it is scaled - and
+    # so nowhere near the composited picture the stacked blur works on.
+    assert "[0:v]split=2" in graph
+    assert "crop=768:130:192:864" in graph
+    assert "_keep]" not in graph
+    assert _composited(graph, "crop=768:130:192:864") < _composited(graph, "[vid]overlay")
+
+
+def test_a_blur_that_lands_off_the_canvas_is_reported_rather_than_drawn(tmp_path):
+    """A crop reaching past the frame fails the whole render, so it is dropped."""
+    config = _config(
+        video_rect={"x": 0.95, "y": 0.28, "w": 1.0, "h": 0.44},
+        images=[_image("logo", 30, w=0.2, h=0.1)],
+        blur_layers=[{**BLUR, "x": 0.9}],
+    )
+    graph, _, warnings = _compose(config, tmp_path)
+
+    assert "crop=" not in graph
+    assert any("plate" in warning and "outside the canvas" in warning for warning in warnings)

@@ -142,6 +142,7 @@ ambiguous filename such as `final.mp4`.
   files out of Git and Docker image layers.
 - Do not print secrets or decrypted credentials in commands, logs, reports, or
   test evidence.
+- Do not build image for ui feature. 
 
 ## Verification and definition of done
 

@@ -177,19 +177,48 @@ def publish_brand(brand_id: str, payload: dict[str, object]) -> dict[str, object
     return brands.publish(payload).model_dump(mode="json", exclude_none=True)
 
 
+def _revision(brand_id: str, revision: str) -> int:
+    """Read a revision out of a URL, where "latest" is a legal spelling.
+
+    Resolved here and nowhere later: everything downstream receives the number,
+    so a stored manifest can never say "latest" and start meaning a different
+    layout the next time the brand is published.
+    """
+    if revision == "latest":
+        return brands.latest_revision(brand_id)
+    if not revision.isdigit():
+        # 422, like FastAPI's own answer when this path segment was typed `int`:
+        # a misspelled revision is caller input, not a render that went wrong.
+        raise BrandConfigError("a brand revision is a positive integer or 'latest'")
+    return int(revision)
+
+
+@app.get("/brands/{brand_id}/latest")
+def get_brand_latest_revision(brand_id: str) -> dict[str, object]:
+    """The number "latest" means right now, without fetching the layout itself."""
+    revision = brands.latest_revision(brand_id)
+    published = brands.load_published(brand_id, revision)
+    return {
+        "brand_id": brand_id,
+        "revision": revision,
+        "content_sha256": published.content_sha256,
+    }
+
+
 @app.get("/brands/{brand_id}/revisions/{revision}")
-def get_brand_revision(brand_id: str, revision: int) -> dict[str, object]:
-    return brands.load_published(brand_id, revision).model_dump(
+def get_brand_revision(brand_id: str, revision: str) -> dict[str, object]:
+    return brands.load_published(brand_id, _revision(brand_id, revision)).model_dump(
         mode="json", exclude_none=True
     )
 
 
 @app.get("/brands/{brand_id}/render-config/{revision}/{aspect}")
-def get_brand_render_config(brand_id: str, revision: int, aspect: str) -> dict[str, object]:
+def get_brand_render_config(brand_id: str, revision: str, aspect: str) -> dict[str, object]:
     """What the renderer will actually receive. Useful for verifying a layout."""
     if aspect not in ("vertical", "landscape"):
         raise RenderError("aspect must be 'vertical' or 'landscape'")
-    return brands.render_config(brands.load_published(brand_id, revision), aspect)  # type: ignore[arg-type]
+    published = brands.load_published(brand_id, _revision(brand_id, revision))
+    return brands.render_config(published, aspect)  # type: ignore[arg-type]
 
 
 @app.post("/brands/{brand_id}/assets", status_code=201)
@@ -277,15 +306,33 @@ def create_render_job(request: RenderJobRequest, background: BackgroundTasks) ->
     return JobAccepted(job_id=job_id, video_id=request.video_id, state="queued")
 
 
+def _resolve_revisions(requested: dict[str, int | str]) -> dict[str, int]:
+    """Turn what the caller asked for into the numbers the job will remember.
+
+    Once, at acceptance, and only the numbers travel on: a brand with nothing
+    published refuses the job here rather than falling back to its draft, and a
+    stored manifest can never say "latest" and start meaning something else the
+    next time someone publishes.
+    """
+    return {
+        brand_id: (
+            brands.latest_revision(brand_id) if revision == "latest" else int(revision)
+        )
+        for brand_id, revision in requested.items()
+    }
+
+
 @app.post("/media-revision/jobs", response_model=JobAccepted, status_code=202)
 def create_media_revision_job(
     request: MediaRevisionJobRequest, background: BackgroundTasks
 ) -> JobAccepted:
+    brand_revisions: dict[str, int] | None = None
     if request.brand_revisions is not None:
+        brand_revisions = _resolve_revisions(request.brand_revisions)
         # Every named brand revision is resolved to a render config here, so a
         # draft, a missing file or a layout with no visible footage answers the
         # caller now instead of failing a background job minutes later.
-        for brand_id, brand_revision in request.brand_revisions.items():
+        for brand_id, brand_revision in brand_revisions.items():
             published = brands.load_published(brand_id, brand_revision)
             for aspect in ("landscape", "vertical"):
                 brands.render_config(published, aspect)
@@ -321,9 +368,16 @@ def create_media_revision_job(
         request.metadata_revision_id,
         request.preset_id,
         request.preset_revision,
-        request.brand_revisions,
+        brand_revisions,
     )
-    return JobAccepted(job_id=job_id, video_id=request.video_id, state="queued")
+    return JobAccepted(
+        job_id=job_id,
+        video_id=request.video_id,
+        state="queued",
+        # What "latest" turned into, so the caller can record the same numbers
+        # against its own campaign without asking a second time.
+        brand_revisions=brand_revisions,
+    )
 
 
 @app.get("/jobs/{job_id}")

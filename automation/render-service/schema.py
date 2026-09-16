@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -24,6 +26,9 @@ class JobAccepted(BaseModel):
     job_id: str
     video_id: str
     state: str
+    # Present on a brand-owned job: the concrete revision each brand resolved
+    # to, which is what a caller that asked for "latest" needs to record.
+    brand_revisions: dict[str, int] | None = None
 
 
 class MediaRevisionJobRequest(BaseModel):
@@ -40,10 +45,13 @@ class MediaRevisionJobRequest(BaseModel):
     preset_id: str | None = None
     preset_revision: int | None = Field(default=None, ge=1)
     # Supplying this selects the brand-owned topology: each named brand renders
-    # its own published layout straight from the source. The revision is named
-    # explicitly for the same reason a preset revision is — a draft or a
-    # floating "latest" is never a valid render input.
-    brand_revisions: dict[str, int] | None = Field(default=None, max_length=10)
+    # its own published layout straight from the source. A number names one
+    # published revision; "latest" asks the service to resolve the highest one
+    # at acceptance and answer with the number it chose. A draft is never a
+    # valid render input, and "latest" never falls back to one.
+    brand_revisions: dict[str, int | Literal["latest"]] | None = Field(
+        default=None, max_length=10
+    )
     callback_url: str | None = None
 
     @model_validator(mode="after")
@@ -53,8 +61,11 @@ class MediaRevisionJobRequest(BaseModel):
         if self.brand_revisions is not None:
             if not self.brand_revisions:
                 raise ValueError("brand_revisions must name at least one brand")
-            if any(revision < 1 for revision in self.brand_revisions.values()):
-                raise ValueError("a brand revision is a positive integer")
+            if any(
+                revision != "latest" and revision < 1
+                for revision in self.brand_revisions.values()
+            ):
+                raise ValueError("a brand revision is a positive integer or 'latest'")
             if self.preset_id is not None:
                 raise ValueError(
                     "a brand-owned render owns its own layout; it cannot also "

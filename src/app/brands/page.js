@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  FiChevronDown,
-  FiChevronUp,
   FiDroplet,
   FiEye,
   FiEyeOff,
@@ -76,30 +74,64 @@ const rectOf = (layer) => ({
   h: Number(layer.h ?? 1),
 });
 
-// A blur has no z: it is applied to the source pixels before the footage is
-// placed, so there is no position in the stack for it to occupy.
-const stacked = (layer) => layer.kind !== "blur";
+/**
+ * How far a layer's origin may travel along one axis.
+ *
+ * Only the extents the layer really has: a text layer is a wrapping box with a
+ * width and no height, so measuring it against the `h: 1` that `rectOf` fills
+ * in left `1 - h` = 0 and pinned every text drag to the top of the canvas.
+ */
+const travel = (extent) => (Number.isFinite(Number(extent)) ? 1 - Number(extent) : 1);
 
-function freshId(layers, stem) {
-  const used = new Set(layers.map((layer) => layer.id));
+// Every layer takes part in the stack, blur included: a blur is applied to the
+// composited picture at its own z, so it can sit under a logo or over it.
+
+/** The name to offer for the next upload of this role: never one already taken. */
+const suggestAssetId = (assets, role) =>
+  freshId(assets, role === "mock_main" ? "mock" : role);
+
+function freshId(items, stem) {
+  const used = new Set(items.map((item) => item.id));
   if (!used.has(stem)) return stem;
-  for (let index = 2; index < 100; index += 1) {
+  // No ceiling on purpose: a brand may carry as many logos or watermarks as it
+  // likes, and the loop ends because the set of taken names is finite.
+  for (let index = 2; ; index += 1) {
     if (!used.has(`${stem}-${index}`)) return `${stem}-${index}`;
   }
-  return `${stem}-${Date.now() % 1000}`;
 }
 
 /** Renumber z from list order, so "on top" in the list is on top in the render. */
 function renumber(layers) {
-  let z = 0;
-  return layers.map((layer) => (stacked(layer) ? { ...layer, z: z++ } : layer));
+  return layers.map((layer, index) => ({ ...layer, z: index }));
 }
 
-const drawOrder = (layers) =>
-  layers
-    .filter(stacked)
-    .slice()
-    .sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
+const drawOrder = (layers) => layers.slice().sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
+
+/**
+ * Give every layer a place in the stack, including the blurs saved before
+ * blurs had one.
+ *
+ * A blur with no `z` was burned into the source before the footage was placed,
+ * so the position that means the same thing is immediately above the main
+ * video — not the bottom of the list, where a bare `z ?? 0` would drop it and
+ * where the footage would then cover it.
+ */
+function normalize(layout) {
+  const video = layout.layers.find((layer) => layer.kind === "main_video");
+  const videoZ = Number(video?.z ?? 10);
+  const place = (layer) => (layer.z ?? (layer.kind === "blur" ? videoZ + 0.5 : 0));
+  return {
+    ...layout,
+    layers: renumber(layout.layers.slice().sort((a, b) => place(a) - place(b))),
+  };
+}
+
+/** One brand as the editor works on it: every layer numbered, nothing else changed. */
+const normalized = (brand) => ({
+  ...brand,
+  vertical: normalize(brand.vertical),
+  landscape: normalize(brand.landscape),
+});
 
 export default function BrandEditorPage() {
   const [brands, setBrands] = useState([]);
@@ -164,7 +196,7 @@ export default function BrandEditorPage() {
       .then((draft) => {
         if (cancelled) return;
         setError("");
-        setBrand(draft);
+        setBrand(normalized(draft));
         setSelectedId(null);
         setStatus(`Đã mở bản nháp của ${draft.display_name}`);
       })
@@ -212,12 +244,9 @@ export default function BrandEditorPage() {
   const addLayer = useCallback(
     (layer) => {
       const id = freshId(layers, layer.id);
-      setLayers((current) => [
-        // Appended on top, which is where an operator expects a thing they just
-        // added to appear rather than hidden behind what is already there.
-        ...renumber([...drawOrder(current), { ...layer, id, z: 99 }]),
-        ...current.filter((item) => !stacked(item)),
-      ]);
+      // Appended on top, which is where an operator expects a thing they just
+      // added to appear rather than hidden behind what is already there.
+      setLayers((current) => renumber([...drawOrder(current), { ...layer, id, z: 99 }]));
       setSelectedId(id);
     },
     [layers, setLayers],
@@ -239,7 +268,24 @@ export default function BrandEditorPage() {
         const target = index + direction;
         if (index < 0 || target < 0 || target >= ordered.length) return current;
         [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
-        return [...renumber(ordered), ...current.filter((layer) => !stacked(layer))];
+        return renumber(ordered);
+      });
+    },
+    [setLayers],
+  );
+
+  const reorder = useCallback(
+    (id, targetId) => {
+      setLayers((current) => {
+        // The list reads top-down, `renumber` reads bottom-up, so the move is
+        // done in display order and the result turned back at the end.
+        const top = drawOrder(current).reverse();
+        const from = top.findIndex((layer) => layer.id === id);
+        const to = top.findIndex((layer) => layer.id === targetId);
+        if (from < 0 || to < 0 || from === to) return current;
+        const [moved] = top.splice(from, 1);
+        top.splice(to, 0, moved);
+        return renumber(top.reverse());
       });
     },
     [setLayers],
@@ -302,13 +348,16 @@ export default function BrandEditorPage() {
     if (!hasKind("main_video")) {
       return setError("Thêm video chính trước: vùng mờ được tính trên khung hình gốc.");
     }
-    const id = freshId(layers, "blur");
-    setLayers((current) => [
-      ...current,
-      { kind: "blur", id, x: 0.1, y: 0.8, w: 0.4, h: 0.12, visible: true },
-    ]);
-    setSelectedId(id);
-    return undefined;
+    return addLayer({
+      kind: "blur",
+      id: "blur",
+      x: 0.1,
+      y: 0.8,
+      w: 0.4,
+      h: 0.12,
+      z: 99,
+      visible: true,
+    });
   };
 
   const addText = () =>
@@ -392,7 +441,7 @@ export default function BrandEditorPage() {
     if (!brand) return;
     const saved = await post({ action: "save-draft", ...brand }, "save");
     if (saved) {
-      setBrand(saved);
+      setBrand(normalized(saved));
       setStatus("Đã lưu bản nháp.");
     }
   };
@@ -593,6 +642,7 @@ export default function BrandEditorPage() {
               selectedId={selectedId}
               onSelect={setSelectedId}
               onMove={move}
+              onReorder={reorder}
               onToggle={(id, visible) => patchLayer(id, { visible })}
               onRemove={removeLayer}
             />
@@ -625,14 +675,17 @@ function AssetPanel({
   onAddSubtitle,
 }) {
   const [role, setRole] = useState("background");
-  const [assetId, setAssetId] = useState("background");
+  // Empty means "whatever the brand has room for". Derived rather than stored,
+  // so the moment an upload lands the suggestion moves on by itself: an upload
+  // stores the file under this id, and a second logo stored under the id of the
+  // first would replace it. logo, logo-2, logo-3, as many as the brand wants.
+  const [typedId, setTypedId] = useState("");
+  const assetId = typedId || suggestAssetId(brand.assets, role);
   const input = useRef(null);
 
   const pick = (nextRole) => {
     setRole(nextRole);
-    // The role is the obvious default name, and a second logo simply gets
-    // edited to "logo-2" rather than forcing a naming decision up front.
-    setAssetId(nextRole === "mock_main" ? "mock" : nextRole);
+    setTypedId("");
   };
 
   return (
@@ -660,7 +713,7 @@ function AssetPanel({
           Mã tài sản
           <input
             value={assetId}
-            onChange={(event) => setAssetId(event.target.value)}
+            onChange={(event) => setTypedId(event.target.value)}
             className="mt-1 w-full rounded border border-divider bg-bg-elevated px-2 py-1.5 text-sm text-primary-text"
           />
         </label>
@@ -810,8 +863,8 @@ function Stage({ brand, canvas, layers, assetById, selectedId, onSelect, onPatch
         onPatch(layer.id, { y: round3(clamp01(Number(layer.y ?? 0.75) + dy)) });
       } else if (mode === "move") {
         onPatch(layer.id, {
-          x: round3(clamp01(Math.min(start.x + dx, 1 - start.w))),
-          y: round3(clamp01(Math.min(start.y + dy, 1 - start.h))),
+          x: round3(clamp01(Math.min(start.x + dx, travel(layer.w)))),
+          y: round3(clamp01(Math.min(start.y + dy, travel(layer.h)))),
         });
       } else if (layer.kind === "text") {
         onPatch(layer.id, { w: round3(Math.min(Math.max(start.w + dx, 0.05), 1 - start.x)) });
@@ -838,8 +891,21 @@ function Stage({ brand, canvas, layers, assetById, selectedId, onSelect, onPatch
         ref={frame}
         onPointerDown={() => onSelect(null)}
       >
+        {/* One pass in z order, blur included: the blur boxes blur what the
+            browser has already painted under them, so the preview shows the
+            same stacking the filtergraph will build. */}
         {drawOrder(layers).map((layer) =>
-          layer.visible === false ? null : (
+          layer.visible === false ? null : layer.kind === "blur" ? (
+            <BlurBox
+              key={layer.id}
+              layer={layer}
+              canvas={canvas}
+              scale={scale}
+              host={video ? rectOf(video) : { x: 0, y: 0, w: 1, h: 1 }}
+              selected={layer.id === selectedId}
+              onDrag={drag}
+            />
+          ) : (
             <LayerBox
               key={layer.id}
               layer={layer}
@@ -853,43 +919,46 @@ function Stage({ brand, canvas, layers, assetById, selectedId, onSelect, onPatch
             />
           ),
         )}
-
-        {/* Blur boxes sit on top of everything in the preview: they are an
-            editing aid, not a layer, and hiding them under the artwork would
-            make them impossible to grab. */}
-        {layers
-          .filter((layer) => layer.kind === "blur" && layer.visible !== false)
-          .map((layer) => {
-            const host = video ? rectOf(video) : { x: 0, y: 0, w: 1, h: 1 };
-            const rect = rectOf(layer);
-            return (
-              <div
-                key={layer.id}
-                onPointerDown={drag(layer, "move")}
-                className={`absolute cursor-move border-2 border-dashed bg-sky-400/20 ${
-                  layer.id === selectedId ? "border-sky-300" : "border-sky-500/70"
-                }`}
-                style={{
-                  left: `${(host.x + rect.x * host.w) * 100}%`,
-                  top: `${(host.y + rect.y * host.h) * 100}%`,
-                  width: `${rect.w * host.w * 100}%`,
-                  height: `${rect.h * host.h * 100}%`,
-                }}
-              >
-                <span className="absolute left-0.5 top-0.5 text-[10px] text-sky-200">
-                  {layer.id}
-                </span>
-                <span
-                  onPointerDown={drag(layer, "resize")}
-                  className="absolute -bottom-1 -right-1 h-3 w-3 cursor-se-resize bg-sky-300"
-                />
-              </div>
-            );
-          })}
       </div>
       <p className="text-xs text-secondary-text">
         {canvas.w}×{canvas.h} · kéo để di chuyển, kéo góc dưới phải để đổi kích thước
       </p>
+    </div>
+  );
+}
+
+/**
+ * A blur region, drawn where its source rectangle lands on the canvas.
+ *
+ * Its numbers stay normalised against the source frame — a blur hides
+ * something inside the footage and has to follow it — so the preview maps them
+ * through the main video's rectangle, exactly as `render.py` does. The CSS
+ * blur radius mirrors the renderer's `min(canvas) * 0.02`, so what the operator
+ * arranges here is what ffmpeg composites.
+ */
+function BlurBox({ layer, canvas, scale, host, selected, onDrag }) {
+  const rect = rectOf(layer);
+  const radius = Math.min(canvas.w, canvas.h) * 0.02 * scale;
+  return (
+    <div
+      onPointerDown={onDrag(layer, "move")}
+      className={`absolute cursor-move border-2 border-dashed ${
+        selected ? "border-sky-300" : "border-sky-500/70"
+      }`}
+      style={{
+        left: `${(host.x + rect.x * host.w) * 100}%`,
+        top: `${(host.y + rect.y * host.h) * 100}%`,
+        width: `${rect.w * host.w * 100}%`,
+        height: `${rect.h * host.h * 100}%`,
+        backdropFilter: `blur(${radius}px)`,
+        WebkitBackdropFilter: `blur(${radius}px)`,
+      }}
+    >
+      <span className="absolute left-0.5 top-0.5 text-[10px] text-sky-200">{layer.id}</span>
+      <span
+        onPointerDown={onDrag(layer, "resize")}
+        className="absolute -bottom-1 -right-1 h-3 w-3 cursor-se-resize bg-sky-300"
+      />
     </div>
   );
 }
@@ -1033,44 +1102,79 @@ function LayerBox({ layer, canvas, scale, brandId, asset, mockAsset, selected, o
 // right: the stack and one layer's numbers
 // ---------------------------------------------------------------------------
 
-function LayerList({ layers, selectedId, onSelect, onMove, onToggle, onRemove }) {
+function LayerList({ layers, selectedId, onSelect, onMove, onReorder, onToggle, onRemove }) {
   const ordered = drawOrder(layers).reverse();
-  const blurs = layers.filter((layer) => layer.kind === "blur");
+  const [dragging, setDragging] = useState(null);
+  const [over, setOver] = useState(null);
+
+  const stop = () => {
+    setDragging(null);
+    setOver(null);
+  };
 
   return (
     <section className="rounded-lg border border-divider bg-bg-card p-3">
-      <h2 className="mb-2 text-sm font-semibold">Lớp (trên xuống dưới)</h2>
-      {!ordered.length && !blurs.length && (
+      <h2 className="text-sm font-semibold">Lớp (trên xuống dưới)</h2>
+      <p className="mb-2 text-[11px] text-secondary-text">
+        Kéo một lớp để đổi thứ tự. Bàn phím: Alt + ↑ / ↓.
+      </p>
+      {!ordered.length && (
         <p className="text-xs text-secondary-text">
           Nền đen, chưa có lớp nào. Tải một tài sản rồi bấm “Đặt vào bố cục”.
         </p>
       )}
       <ul className="flex flex-col gap-1">
-        {[...ordered, ...blurs].map((layer) => {
+        {ordered.map((layer) => {
           const Icon = KIND_ICON[layer.kind] || FiLayers;
-          const isBlur = layer.kind === "blur";
+          const state =
+            layer.id === dragging
+              ? "opacity-40"
+              : layer.id === over
+                ? "ring-1 ring-primary"
+                : "";
           return (
             <li
               key={layer.id}
+              draggable
+              tabIndex={0}
               onClick={() => onSelect(layer.id)}
-              className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs ${
+              onDragStart={(event) => {
+                setDragging(layer.id);
+                event.dataTransfer.effectAllowed = "move";
+                // Firefox refuses to start a drag at all without a payload.
+                event.dataTransfer.setData("text/plain", layer.id);
+              }}
+              onDragOver={(event) => {
+                // The default action of dragover is "refuse the drop".
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setOver(layer.id);
+              }}
+              onDragLeave={() =>
+                setOver((current) => (current === layer.id ? null : current))
+              }
+              onDrop={(event) => {
+                event.preventDefault();
+                if (dragging && dragging !== layer.id) onReorder(dragging, layer.id);
+                stop();
+              }}
+              onDragEnd={stop}
+              onKeyDown={(event) => {
+                // Alt, so the arrows still scroll the panel on their own.
+                const step = { ArrowUp: 1, ArrowDown: -1 }[event.key];
+                if (!step || !event.altKey) return;
+                event.preventDefault();
+                onMove(layer.id, step);
+              }}
+              title="Kéo để đổi thứ tự"
+              className={`flex cursor-grab items-center gap-2 rounded px-2 py-1.5 text-xs active:cursor-grabbing ${
                 layer.id === selectedId ? "bg-primary/25" : "hover:bg-bg-card-hover"
-              }`}
+              } ${state}`}
             >
               <Icon size={13} className="shrink-0 text-secondary-text" />
               <span className="truncate font-medium">{layer.id}</span>
               <span className="shrink-0 text-secondary-text">{KIND_LABEL[layer.kind]}</span>
               <span className="ml-auto flex shrink-0 items-center gap-0.5">
-                {!isBlur && (
-                  <>
-                    <IconButton title="Lên trên" onClick={() => onMove(layer.id, 1)}>
-                      <FiChevronUp size={13} />
-                    </IconButton>
-                    <IconButton title="Xuống dưới" onClick={() => onMove(layer.id, -1)}>
-                      <FiChevronDown size={13} />
-                    </IconButton>
-                  </>
-                )}
                 <IconButton
                   title={layer.visible === false ? "Hiện" : "Ẩn"}
                   onClick={() => onToggle(layer.id, layer.visible === false)}

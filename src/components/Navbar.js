@@ -32,7 +32,9 @@ export default function Navbar() {
       ]
     : [
         { name: "Workspace", path: "/" },
-        { name: "Visual editor", path: "/preset-editor" },
+        // The brand editor replaced the preset split; /preset-editor still
+        // resolves for old links but is no longer the way in.
+        { name: "Visual editor", path: "/brands" },
         { name: "Gallery", path: "/gallery" },
       ];
 

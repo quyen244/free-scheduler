@@ -12,6 +12,7 @@ import logging
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -230,6 +231,34 @@ def _blur_chain(regions: list[presets.Box], source: Source) -> tuple[list[str], 
     return steps, current
 
 
+def _stacked_blur(
+    region: presets.Box, geometry: presets.Geometry, stem: str
+) -> Callable[[str, str], list[str]]:
+    """Blur one rectangle of the picture the stack has drawn so far.
+
+    The pre-stacking blur in `_blur_chain` works on the source's own pixels and
+    is therefore always underneath everything. This one is an ordinary layer:
+    it blurs whatever the layers below it painted, so an operator can hide a
+    caption in the footage *and* the watermark somebody put over it.
+
+    Three steps rather than one filter - copy the frame, blur the crop, put it
+    back - which is why a layer contributes a callable instead of a string.
+    """
+    # Scaled to the canvas, matching `_blur_chain` scaling to the source: the
+    # region covers the same picture either way, so it needs the same strength.
+    radius = max(int(round(min(geometry.canvas_w, geometry.canvas_h) * 0.02)), 2)
+
+    def build(current: str, nxt: str) -> list[str]:
+        return [
+            f"[{current}]split=2[{stem}_keep][{stem}_cut]",
+            f"[{stem}_cut]crop={region.w}:{region.h}:{region.x}:{region.y},"
+            f"boxblur=luma_radius={radius}:luma_power=2[{stem}_soft]",
+            f"[{stem}_keep][{stem}_soft]overlay={region.x}:{region.y}[{nxt}]",
+        ]
+
+    return build
+
+
 def _drawtext(config: dict, textfile: str, geometry: presets.Geometry, family: str) -> str:
     """One centred line of text.
 
@@ -442,8 +471,9 @@ def compose_clean(
     )
 
     extra_inputs: list[str] = []
-    # (z, sequence, label stem, filter applied to the running composite)
-    layers: list[tuple[int, int, str, str]] = []
+    # (z, sequence, label stem, what it adds to the running composite: either a
+    # filter to hang off it, or a builder for the layers that need more than one)
+    layers: list[tuple[int, int, str, str | Callable[[str, str], list[str]]]] = []
     sequence = 0
 
     if preset.get("video_visible", True):
@@ -474,6 +504,22 @@ def compose_clean(
                 f"img{index}",
                 f"[{label}]{overlay}",
             )
+        )
+        sequence += 1
+
+    # Blurs that were given a place in the stack. Their rectangles are still
+    # source-normalised - they hide something in the footage - so they are
+    # mapped through the footage's own box before they become canvas pixels.
+    for blur in preset.get("blur_layers") or []:
+        region = presets.on_canvas(blur, geometry)
+        if region is None:
+            warnings.append(
+                f"blur layer {blur.get('id')!r} falls outside the canvas and was not drawn"
+            )
+            continue
+        stem = f"blur{sequence}"
+        layers.append(
+            (int(blur.get("z", 11)), sequence, stem, _stacked_blur(region, geometry, stem))
         )
         sequence += 1
 
@@ -541,9 +587,12 @@ def compose_clean(
         )
 
     current = "bg"
-    for _, _, stem, expression in sorted(layers, key=lambda item: (item[0], item[1])):
+    for _, _, stem, fragment in sorted(layers, key=lambda item: (item[0], item[1])):
         nxt = f"{stem}_out"
-        steps.append(f"[{current}]{expression}[{nxt}]")
+        if callable(fragment):
+            steps.extend(fragment(current, nxt))
+        else:
+            steps.append(f"[{current}]{fragment}[{nxt}]")
         current = nxt
     if current == "bg":
         # Drawing nothing at all is a configuration mistake rather than a

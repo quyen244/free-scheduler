@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "script -qec 'next dev --webpack' /dev/null",
+    "dev": "next dev --webpack",
+    "dev:tty": "script -qec 'next dev --webpack' /dev/null",
     "build": "prisma generate && next build --webpack",
     "start": "next start",
     "lint": "eslint",

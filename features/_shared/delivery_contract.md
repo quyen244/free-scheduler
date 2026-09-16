@@ -90,6 +90,8 @@ TikTok only when both targets belong to the same brand.
   carries a `lineage_asset_id` naming its clean master; under `brand_owned`
   there are no clean assets, no lineage, and `brand_revisions` names the exact
   published brand revision used for each brand.
-- A brand-owned render job names an explicit brand revision. A draft brand or an
-  unversioned "latest" is never a valid render input.
+- A brand-owned render job names an explicit brand revision, or asks for
+  `"latest"` and is answered with the number it resolved to. A draft brand is
+  never a valid render input, and the resolved number — never the word — is
+  what the manifest records.
 

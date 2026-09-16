@@ -8,14 +8,28 @@ const service = () => process.env.RENDER_SERVICE_URL || "http://127.0.0.1:8003";
 const BRAND_ID = /^[a-z0-9][a-z0-9-]{1,62}$/;
 
 async function proxy(path, init) {
+  let response;
   try {
-    const response = await fetch(`${service()}${path}`, { cache: "no-store", ...init });
-    const payload = await response.json();
-    return NextResponse.json(payload, { status: response.status });
+    response = await fetch(`${service()}${path}`, { cache: "no-store", ...init });
   } catch (error) {
+    // Only a failed connection is "unavailable". An answer that arrived is the
+    // service's answer, however it is shaped.
     return NextResponse.json(
       { error: `Render service is unavailable: ${error.message}` },
       { status: 503 },
+    );
+  }
+  const body = await response.text();
+  try {
+    return NextResponse.json(JSON.parse(body), { status: response.status });
+  } catch {
+    // FastAPI answers an unhandled exception with the plain text "Internal
+    // Server Error". Parsing that as JSON used to fail and be reported as a
+    // dead service, which sent the reader looking for the wrong problem — the
+    // real one was in the render service's log the whole time.
+    return NextResponse.json(
+      { error: `Render service error ${response.status}: ${body.slice(0, 300) || "(empty response)"}` },
+      { status: response.status === 200 ? 502 : response.status },
     );
   }
 }
@@ -38,7 +52,10 @@ export async function GET(request) {
   try {
     if (action === "brands") return proxy("/brands");
     if (action === "draft") return proxy(`/brands/${brandId(searchParams)}/draft`);
+    if (action === "latest") return proxy(`/brands/${brandId(searchParams)}/latest`);
     if (action === "published") {
+      // "latest" is a legal spelling of a revision here; the render service
+      // resolves it and is the only place that may.
       const revision = encodeURIComponent(searchParams.get("revision") || "");
       return proxy(`/brands/${brandId(searchParams)}/revisions/${revision}`);
     }

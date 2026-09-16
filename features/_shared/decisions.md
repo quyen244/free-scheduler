@@ -106,9 +106,22 @@ Last updated: 2026-09-16
   are `image`, `main_video`, `blur`, `host`, `text`, and `subtitle`. A new brand
   starts as a black canvas with no layers; every layer present was placed by an
   operator.
+- A blur region takes part in the layer stack like any other layer. Its
+  rectangle stays normalised against the **source frame**, because a blur hides
+  something inside the footage and must follow it when the source channel
+  changes resolution, but its `z` decides when it is applied: a blur above the
+  logo blurs the logo, a blur below it does not. This supersedes the earlier
+  rule that a blur has no `z` and is always applied to the source pixels before
+  compositing. A blur layer with no `z` keeps the old meaning, so revisions
+  published before this decision render exactly as they did.
 - The presenter (host) video belongs to the brand, not to a shared preset. Each
   brand uploads its own presenter and RVM matting runs once at upload, storing a
   derived alpha video beside the original. The original stays immutable.
+- A role is a label on an asset, not a slot. A brand may hold any number of
+  logos or watermarks, and may place the same asset into a layout as many times
+  as it likes; each upload and each placement gets its own free id. Only `host`
+  and `main_video` stay one per layout, because the renderer composites exactly
+  one of each.
 - Publishing a brand draft creates a numbered, immutable revision carrying a
   `content_sha256`. A draft is never a valid render input.
 - Because a brand owns the footage rectangle, the blur regions, and the
@@ -133,8 +146,19 @@ Last updated: 2026-09-16
   `brand_revisions` so the exact published brand revision behind every asset is
   auditable and an approval can be invalidated when a brand is republished.
 - A brand-owned render job must name an explicit brand revision per brand. It
-  must not consume a draft or an unversioned "latest" configuration, for the
-  same reason a visual preset could not.
+  must not consume a draft, for the same reason a visual preset could not.
+- A caller may ask for `"latest"` instead of a number. The render service
+  resolves it once, when the job is accepted, to the highest published revision
+  of that brand, answers with the number it chose, and records that number in
+  the manifest. The floating word is never stored and never reaches a renderer,
+  so a manifest still names the exact layout behind every asset and a rendered
+  campaign still cannot change meaning when someone republishes the brand. This
+  narrows, rather than removes, the earlier prohibition on "latest": what was
+  forbidden — an unversioned reference travelling into stored state — stays
+  forbidden.
+- `"latest"` never falls back to a draft. A brand with no published revision
+  refuses the job, because the alternative is a render that silently uses a
+  layout nobody approved.
 - The expected asset count per source is unchanged from the delivery contract:
   a `brand_owned` revision still produces `brands * (1 + N)` delivery assets.
   Only the intermediate clean masters disappear.

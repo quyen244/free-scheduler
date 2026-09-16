@@ -104,6 +104,32 @@ def resolve(preset: dict, source_w: int, source_h: int) -> Geometry:
     )
 
 
+def on_canvas(region: dict, geometry: Geometry) -> Box | None:
+    """Where a source-normalised rectangle lands once the footage is placed.
+
+    `resolve` fits the whole source inside `geometry.video`, so a fraction of
+    the source is the same fraction of that box — which is what lets a blur
+    keep source coordinates (it hides something in the footage) and still be
+    composited on the canvas at its own place in the layer stack.
+
+    Returns None for a rectangle that ends up outside the canvas: a crop that
+    reaches past the frame fails the whole render rather than blurring what it
+    can reach.
+    """
+    video = geometry.video
+    left = _even_pos(video.x + video.w * float(region["x"]))
+    top = _even_pos(video.y + video.h * float(region["y"]))
+    right = min(left + _even(video.w * float(region["w"])), geometry.canvas_w)
+    bottom = min(top + _even(video.h * float(region["h"])), geometry.canvas_h)
+    # Rounded *down* here, unlike a standalone dimension: rounding 1079 up to
+    # 1080 against a 1080 canvas puts the crop one pixel past the edge.
+    width = int((right - left) // 2) * 2
+    height = int((bottom - top) // 2) * 2
+    if width < 2 or height < 2:
+        return None
+    return Box(x=left, y=top, w=width, h=height)
+
+
 def clamp_regions(regions: list[Box], source_w: int, source_h: int) -> list[Box]:
     """Keep every blur box inside the frame.
 

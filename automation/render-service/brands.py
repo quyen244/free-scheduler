@@ -188,13 +188,18 @@ class MainVideoLayer(_Placed):
 
 
 class BlurLayer(BaseModel):
-    """A rectangle blurred out of the source footage before it is composited.
+    """A rectangle blurred out of the footage.
 
     Normalised against the SOURCE frame rather than the canvas, because a blur
     hides something *inside* the footage and has to track it when the source
-    channel changes resolution.  It has no ``z``: it is applied to the main
-    video's own pixels, so it is always underneath every other layer by
-    construction.
+    channel changes resolution.  Where it lands on the canvas follows from the
+    main video's rectangle, which is why a blur needs one.
+
+    ``z`` places it in the stack like any other layer: a blur above the logo
+    blurs the logo, a blur below it does not.  ``None`` is the pre-stacking
+    meaning - applied to the source's own pixels before the footage is placed,
+    and so underneath everything by construction - kept so revisions published
+    before blurs had a ``z`` still render the way they were approved.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -205,6 +210,7 @@ class BlurLayer(BaseModel):
     y: float = Field(ge=0, le=1)
     w: float = Field(gt=0, le=1)
     h: float = Field(gt=0, le=1)
+    z: int | None = Field(default=None, ge=0, le=99)
     visible: bool = True
 
     @model_validator(mode="after")
@@ -688,11 +694,20 @@ def render_config(
         "video_fit": main.fit,
         "video_z": main.z,
         "video_visible": True,
-        # Source-frame coordinates, which is why they are not in `images`.
+        # Source-frame coordinates in both lists, which is why neither is in
+        # `images`. The split is when they are applied: a blur with no `z` is
+        # burned into the source before it is placed, a blur with one is
+        # composited over whatever the stack had drawn by the time it is
+        # reached.
         "blur_regions": [
             {"x": blur.x, "y": blur.y, "w": blur.w, "h": blur.h}
             for blur in layout.blurs
-            if blur.visible
+            if blur.visible and blur.z is None
+        ],
+        "blur_layers": [
+            {"id": blur.id, "x": blur.x, "y": blur.y, "w": blur.w, "h": blur.h, "z": blur.z}
+            for blur in layout.blurs
+            if blur.visible and blur.z is not None
         ],
         "images": images,
         "host": host,
