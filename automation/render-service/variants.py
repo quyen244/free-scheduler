@@ -453,6 +453,83 @@ def render_brand_revision(
     return result
 
 
+def render_brand_preview(
+    video_id: str,
+    preview_id: str,
+    *,
+    brand_revisions: dict[str, int],
+    selections: dict[str, dict[str, object]],
+    on_progress: Progress | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> tuple[list[manifest.MediaAsset], list[dict[str, str]], bool]:
+    """Render an operator preview without touching delivery paths or manifests."""
+    chunks = library_chunks(video_id)
+    by_number = {int(chunk["idx"]) + 1: chunk for chunk in chunks}
+    transcript = library.load_transcript(video_id)
+    segments = transcript.get("segments") or []
+    voice_manifest = library.load_voice_manifest(video_id) or {}
+    source = render.probe(library.raw_path(video_id))
+    from shared import pipeline_db
+
+    fields = {"title": pipeline_db.title_for(video_id)}
+    warnings = list(voice_manifest.get("warnings") or [])
+    targets: list[tuple[str, str, dict[str, object] | None]] = []
+    for brand_id in sorted(brand_revisions):
+        selection = selections[brand_id]
+        variant = str(selection["variants"])
+        if variant in ("all", "landscape"):
+            targets.append((brand_id, "landscape", None))
+        if variant in ("all", "vertical"):
+            numbers = selection.get("chunks") or sorted(by_number)
+            for number in numbers:
+                chunk = by_number.get(int(number))
+                if chunk is None:
+                    raise RenderError(f"requested chunk {number} does not exist")
+                targets.append((brand_id, "vertical", chunk))
+
+    configs: dict[str, dict[str, dict]] = {}
+    for brand_id, revision in brand_revisions.items():
+        published = brand_layouts.load_published(brand_id, revision)
+        configs[brand_id] = {
+            aspect: brand_layouts.render_config(published, aspect)
+            for aspect in ("landscape", "vertical")
+        }
+
+    assets: list[manifest.MediaAsset] = []
+    failures: list[dict[str, str]] = []
+    root = library.video_dir(video_id) / "previews" / preview_id / "brands"
+    for position, (brand_id, aspect, chunk) in enumerate(targets):
+        if cancelled and cancelled():
+            return assets, failures, True
+        content_item = manifest.WHOLE_ITEM if chunk is None else str(chunk["name"])
+        file_name = "whole-16x9.mp4" if chunk is None else f"{content_item}-9x16.mp4"
+        output = root / brand_id / ("vertical" if chunk is not None else "") / file_name
+        try:
+            assets.append(
+                render.render_brand_variant(
+                    video_id,
+                    1,
+                    configs[brand_id][aspect],
+                    brand_id,
+                    segments,
+                    chunk=chunk,
+                    fields=fields,
+                    texts=(
+                        {"caption_top": str(chunk.get("hook") or ""), "caption_bottom": str(chunk.get("caption") or "")}
+                        if chunk is not None else None
+                    ),
+                    warnings=warnings,
+                    output_path=output,
+                    cancelled=cancelled,
+                )
+            )
+        except Exception as exc:  # preserve successful preview peers
+            failures.append({"brand_id": brand_id, "content_item_id": content_item, "error": f"{type(exc).__name__}: {exc}"})
+        if on_progress:
+            on_progress((position + 1) / len(targets))
+    return assets, failures, False
+
+
 def library_chunks(video_id: str) -> list[dict[str, object]]:
     """Read chunks at the service boundary so rendering never trusts request spans."""
     from shared import pipeline_db

@@ -29,6 +29,51 @@ class JobAccepted(BaseModel):
     # Present on a brand-owned job: the concrete revision each brand resolved
     # to, which is what a caller that asked for "latest" needs to record.
     brand_revisions: dict[str, int] | None = None
+    reused: bool = False
+
+
+class PreviewBrandRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int | Literal["latest"] = "latest"
+    variants: Literal["all", "landscape", "vertical"] = "all"
+    chunks: list[int] | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_targets(self) -> "PreviewBrandRequest":
+        if self.revision != "latest" and self.revision < 1:
+            raise ValueError("a brand revision is a positive integer or 'latest'")
+        if self.chunks is not None:
+            if self.variants == "landscape":
+                raise ValueError("chunks may only be used with all or vertical variants")
+            if any(chunk < 1 for chunk in self.chunks):
+                raise ValueError("chunks are one-based positive integers")
+            if len(self.chunks) != len(set(self.chunks)):
+                raise ValueError("chunks must not contain duplicates")
+        return self
+
+
+class MediaPreviewJobRequest(BaseModel):
+    """A selective operator preview; never a delivery revision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    video_id: str
+    brands: dict[str, PreviewBrandRequest] = Field(min_length=1, max_length=10)
+    request_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,80}$")
+
+
+class PreviewRetryRequest(BaseModel):
+    """A new request id makes a retry safe against a lost HTTP response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,80}$")
+
+
+class CancelledJob(BaseModel):
+    job_id: str
+    state: Literal["cancelled"]
 
 
 class MediaRevisionJobRequest(BaseModel):

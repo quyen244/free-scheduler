@@ -327,8 +327,9 @@ def inspect_expected_asset(
     lineage_asset_id: str | None = None,
     duration_tolerance_s: float = 0.5,
     warnings: list[str] | None = None,
+    path: Path | None = None,
 ) -> MediaAsset:
-    path = expected_asset_path(
+    path = path or expected_asset_path(
         video_id, render_revision, role, content_item_id, brand_id
     )
     if not path.is_file() or path.stat().st_size <= 0:

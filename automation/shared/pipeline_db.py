@@ -33,6 +33,7 @@ JOB_KINDS = (
     "render",
     "metadata",
     "media_revision",
+    "media_preview",
 )
 
 # A video only ever moves forward through these. See contracts.md.
@@ -41,7 +42,7 @@ STAGE_ORDER = (
     "chunked", "rendered", "captioned", "ready",
 )
 _STAGE_RANK = "," + ",".join(STAGE_ORDER) + ","
-TERMINAL_STATES = ("done", "failed")
+TERMINAL_STATES = ("done", "failed", "cancelled")
 
 
 @contextmanager
@@ -75,6 +76,38 @@ def init() -> None:
     _add_chunk_contract_columns()
     _add_source_validation_columns()
     _add_metadata_contract_columns()
+    _add_preview_request_table()
+    _add_preview_plan_table()
+
+
+def _add_preview_request_table() -> None:
+    """Persist preview request-id deduplication across service restarts."""
+    with connect() as conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS preview_requests (
+                request_id TEXT PRIMARY KEY,
+                fingerprint TEXT NOT NULL,
+                job_id TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )"""
+        )
+
+
+def _add_preview_plan_table() -> None:
+    """Keep a preview's frozen inputs even when it has no request id.
+
+    A request id protects a client retry.  It is not the render plan itself:
+    callers may deliberately omit it, and a worker restart still needs enough
+    information to offer a retry without resolving ``latest`` a second time.
+    """
+    with connect() as conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS preview_plans (
+                job_id TEXT PRIMARY KEY,
+                plan TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )"""
+        )
 
 
 def _add_chunk_contract_columns() -> None:
@@ -150,7 +183,10 @@ def _widen_job_kinds() -> None:
         definition = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'"
         ).fetchone()
-        if definition is None or all(kind in definition["sql"] for kind in JOB_KINDS):
+        if definition is None or (
+            all(kind in definition["sql"] for kind in JOB_KINDS)
+            and "cancelled" in definition["sql"]
+        ):
             return
 
         logger.info("widening jobs.kind to %s", ", ".join(JOB_KINDS))
@@ -171,7 +207,7 @@ def _widen_job_kinds() -> None:
                     video_id     TEXT NOT NULL,
                     kind         TEXT NOT NULL CHECK (kind IN ({kinds})),
                     state        TEXT NOT NULL DEFAULT 'queued'
-                                 CHECK (state IN ('queued', 'running', 'done', 'failed')),
+                                 CHECK (state IN ('queued', 'running', 'done', 'failed', 'cancelled')),
                     progress     REAL NOT NULL DEFAULT 0,
                     result       TEXT,
                     error        TEXT,
@@ -486,9 +522,88 @@ def create_or_reuse_active_job(
     return job_id, "queued", False
 
 
+def create_or_reuse_preview_job(
+    video_id: str, request_id: str | None, fingerprint: str, plan: dict[str, object]
+) -> tuple[str, str, bool]:
+    """Create a preview job, or return the exact prior request-id submission."""
+    frozen_plan = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if request_id is None:
+        job_id = create_job(video_id, "media_preview")
+        with connect() as conn:
+            conn.execute(
+                "INSERT INTO preview_plans (job_id, plan, created_at) VALUES (?, ?, ?)",
+                (job_id, frozen_plan, _now()),
+            )
+        return job_id, "queued", False
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            existing = conn.execute(
+                "SELECT fingerprint, job_id FROM preview_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["fingerprint"]) != fingerprint:
+                    raise ValueError("request_id was already used with a different preview plan")
+                job = conn.execute(
+                    "SELECT state FROM jobs WHERE job_id = ?", (existing["job_id"],)
+                ).fetchone()
+                conn.execute("COMMIT")
+                return str(existing["job_id"]), str(job["state"]), True
+            job_id = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO jobs (job_id, video_id, kind, state, created_at) "
+                "VALUES (?, ?, 'media_preview', 'queued', ?)",
+                (job_id, video_id, _now()),
+            )
+            conn.execute(
+                "INSERT INTO preview_requests (request_id, fingerprint, job_id, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (request_id, fingerprint, job_id, _now()),
+            )
+            conn.execute(
+                "INSERT INTO preview_plans (job_id, plan, created_at) VALUES (?, ?, ?)",
+                (job_id, frozen_plan, _now()),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    return job_id, "queued", False
+
+
+def preview_plan_for_job(job_id: str) -> dict[str, object] | None:
+    """Return the acceptance-time preview plan, never a mutable brand draft."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT plan FROM preview_plans WHERE job_id = ?", (job_id,)
+        ).fetchone()
+    return json.loads(row["plan"]) if row is not None else None
+
+
 def mark_running(job_id: str) -> None:
     with connect() as conn:
-        conn.execute("UPDATE jobs SET state = 'running' WHERE job_id = ?", (job_id,))
+        conn.execute(
+            "UPDATE jobs SET state = 'running' WHERE job_id = ? AND state = 'queued'",
+            (job_id,),
+        )
+
+
+def cancel_job(job_id: str) -> bool:
+    """Cancel a queued/running job. Workers must observe the state between units."""
+    with connect() as conn:
+        changed = conn.execute(
+            "UPDATE jobs SET state = 'cancelled', finished_at = ? "
+            "WHERE job_id = ? AND state IN ('queued', 'running')",
+            (_now(), job_id),
+        ).rowcount
+    return bool(changed)
+
+
+def is_cancelled(job_id: str) -> bool:
+    with connect() as conn:
+        row = conn.execute("SELECT state FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+    return row is not None and row["state"] == "cancelled"
 
 
 def set_progress(job_id: str, progress: float) -> None:
@@ -545,7 +660,7 @@ def unfinished_jobs(kinds: tuple[str, ...]) -> list[dict[str, object]]:
     placeholders = ",".join("?" for _ in kinds)
     with connect() as conn:
         rows = conn.execute(
-            "SELECT job_id, video_id FROM jobs "
+            "SELECT job_id, video_id, kind FROM jobs "
             f"WHERE state IN ('queued', 'running') AND kind IN ({placeholders})",
             kinds,
         ).fetchall()

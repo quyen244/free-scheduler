@@ -176,6 +176,7 @@ def _run_encode(
     content_item_id: str,
     media_duration_s: float,
     cwd: Path | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> None:
     """Run one encode, recording which encoder ran and how long it took.
 
@@ -192,7 +193,21 @@ def _run_encode(
         choice.requested, choice.selected, choice.is_hardware, choice.fallback_reason,
     )
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True, cwd=cwd)
+        if cancelled is None:
+            subprocess.run(command, check=True, capture_output=True, text=True, cwd=cwd)
+        else:
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd
+            )
+            while process.poll() is None:
+                if cancelled():
+                    process.terminate()
+                    _, stderr = process.communicate()
+                    raise subprocess.CalledProcessError(process.returncode or -15, command, stderr=stderr)
+                time.sleep(0.2)
+            _, stderr = process.communicate()
+            if process.returncode:
+                raise subprocess.CalledProcessError(process.returncode, command, stderr=stderr)
     except subprocess.CalledProcessError:
         logger.error(
             "encode failed: stage=%s item=%s selected_encoder=%s elapsed_s=%.3f",
@@ -1012,6 +1027,8 @@ def render_brand_variant(
     fields: dict[str, str] | None = None,
     texts: dict[str, str] | None = None,
     warnings: list[str] | None = None,
+    output_path: Path | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> manifests.MediaAsset:
     """Render one delivery asset straight from the source for one brand.
 
@@ -1055,7 +1072,7 @@ def render_brand_variant(
         stem = f"{content_item_id}-9x16"
         fields = {"part": str(idx + 1), **(fields or {})}
 
-    output = manifests.expected_asset_path(
+    output = output_path or manifests.expected_asset_path(
         video_id, render_revision, role, content_item_id, brand_id
     )
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -1121,6 +1138,7 @@ def render_brand_variant(
             content_item_id=content_item_id,
             media_duration_s=duration_s,
             cwd=output.parent,
+            cancelled=cancelled,
         )
     except subprocess.CalledProcessError as exc:
         partial.unlink(missing_ok=True)
@@ -1138,6 +1156,7 @@ def render_brand_variant(
         expected_duration_s=duration_s,
         brand_id=brand_id,
         warnings=[*(warnings or []), *composed_warnings],
+        path=output,
     )
 
 

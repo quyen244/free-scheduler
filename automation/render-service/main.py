@@ -1,3 +1,4 @@
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -30,6 +31,9 @@ from errors import (
 )
 from schema import (
     JobAccepted,
+    CancelledJob,
+    MediaPreviewJobRequest,
+    PreviewRetryRequest,
     MediaRevisionJobRequest,
     RenderJobRequest,
     PresetMattingRequest,
@@ -322,6 +326,155 @@ def _resolve_revisions(requested: dict[str, int | str]) -> dict[str, int]:
     }
 
 
+def _freeze_preview_plan(
+    video_id: str,
+    brand_revisions: dict[str, int],
+    selections: dict[str, dict[str, object]],
+    *,
+    retry_of: str | None = None,
+    inherited_assets: list[object] | None = None,
+) -> dict[str, object]:
+    """Validate and freeze every render-affecting input for a preview job."""
+    available_chunks = {int(chunk["idx"]) + 1 for chunk in pipeline_db.chunks_for(video_id)}
+    if not available_chunks:
+        raise NoChunksError(
+            f"no chunks for {video_id!r} — POST it to the transcript service's /chunk first"
+        )
+    for brand_id, revision in brand_revisions.items():
+        published = brands.load_published(brand_id, revision)
+        selection = selections[brand_id]
+        variants = str(selection["variants"])
+        for aspect in (
+            ("landscape", "vertical") if variants == "all"
+            else ("landscape",) if variants == "landscape" else ("vertical",)
+        ):
+            brands.render_config(published, aspect)
+        selected_chunks = selection.get("chunks") or []
+        if not set(int(chunk) for chunk in selected_chunks).issubset(available_chunks):
+            missing = sorted(set(int(chunk) for chunk in selected_chunks) - available_chunks)
+            raise NoChunksError(f"requested chunks do not exist: {missing}")
+    library.load_voice_track(video_id)
+    return {
+        "video_id": video_id,
+        "brand_revisions": brand_revisions,
+        "selections": selections,
+        "retry_of": retry_of,
+        "inherited_assets": inherited_assets or [],
+    }
+
+
+def _retry_targets(result: dict[str, object]) -> tuple[dict[str, int], dict[str, dict[str, object]]]:
+    """Turn typed failures into the smallest retry plan for the frozen job."""
+    source_revisions = {
+        str(brand_id): int(revision)
+        for brand_id, revision in dict(result.get("brand_revisions") or {}).items()
+    }
+    source_selections = {
+        str(brand_id): dict(selection)
+        for brand_id, selection in dict(result.get("selections") or {}).items()
+    }
+    if not source_revisions or set(source_revisions) != set(source_selections):
+        raise BrandConfigError("preview job has no complete frozen plan to retry")
+    failures = result.get("failures") or []
+    if not failures:
+        # A service restart has no trustworthy per-target progress record.  It
+        # retries exactly the original frozen plan, never resolves latest.
+        return source_revisions, source_selections
+
+    requested: dict[str, dict[str, object]] = {}
+    for failure in failures:
+        if not isinstance(failure, dict):
+            raise BrandConfigError("preview job has an invalid typed failure")
+        brand_id = str(failure.get("brand_id") or "")
+        item = str(failure.get("content_item_id") or "")
+        if brand_id not in source_revisions:
+            raise BrandConfigError("preview failure names a brand outside its frozen plan")
+        target = requested.setdefault(brand_id, {"whole": False, "chunks": []})
+        if item == "whole":
+            target["whole"] = True
+        elif item.startswith("part_") and item[5:].isdigit() and int(item[5:]) >= 1:
+            target["chunks"].append(int(item[5:]))
+        else:
+            raise BrandConfigError(f"preview failure has an unknown content item {item!r}")
+
+    revisions: dict[str, int] = {}
+    selections: dict[str, dict[str, object]] = {}
+    for brand_id, target in requested.items():
+        chunks = sorted(set(target["chunks"]))
+        whole = bool(target["whole"])
+        if whole and chunks:
+            selection: dict[str, object] = {"variants": "all", "chunks": chunks}
+        elif whole:
+            selection = {"variants": "landscape"}
+        else:
+            selection = {"variants": "vertical", "chunks": chunks}
+        revisions[brand_id] = source_revisions[brand_id]
+        selections[brand_id] = selection
+    return revisions, selections
+
+
+@app.post("/media-revision/preview-jobs", response_model=JobAccepted, status_code=202)
+def create_media_preview_job(
+    request: MediaPreviewJobRequest, background: BackgroundTasks
+) -> JobAccepted:
+    """Queue a selective operator preview outside the delivery-manifest contract."""
+    requested = {brand_id: selection.revision for brand_id, selection in request.brands.items()}
+    brand_revisions = _resolve_revisions(requested)
+    selections: dict[str, dict[str, object]] = {}
+    for brand_id, revision in brand_revisions.items():
+        selection = request.brands[brand_id]
+        selections[brand_id] = selection.model_dump(exclude={"revision"}, exclude_none=True)
+    plan = _freeze_preview_plan(request.video_id, brand_revisions, selections)
+    fingerprint = json.dumps(
+        plan,
+        sort_keys=True, separators=(",", ":"),
+    )
+    try:
+        job_id, state, reused = pipeline_db.create_or_reuse_preview_job(
+            request.video_id, request.request_id, fingerprint, plan
+        )
+    except ValueError as exc:
+        raise BrandConfigError(str(exc)) from exc
+    if not reused:
+        background.add_task(jobs.run_media_preview, job_id)
+    return JobAccepted(job_id=job_id, video_id=request.video_id, state=state,
+                       brand_revisions=brand_revisions, reused=reused)
+
+
+@app.post("/media-revision/preview-jobs/{job_id}/retry", response_model=JobAccepted, status_code=202)
+def retry_media_preview_job(
+    job_id: str, request: PreviewRetryRequest, background: BackgroundTasks
+) -> JobAccepted:
+    """Retry only a preview's typed failures against its already-frozen plan."""
+    previous = pipeline_db.get_job(job_id)
+    if previous is None:
+        return JSONResponse(status_code=404, content={"error": f"no job {job_id!r}"})
+    if str(previous["kind"]) != "media_preview" or str(previous["state"]) != "failed":
+        raise BrandConfigError("only a failed media preview job can be retried")
+    result = previous.get("result")
+    if not isinstance(result, dict) or not result.get("preview"):
+        raise BrandConfigError("failed preview has no retryable frozen result")
+    brand_revisions, selections = _retry_targets(result)
+    inherited_assets = list(result.get("assets") or [])
+    plan = _freeze_preview_plan(
+        str(previous["video_id"]), brand_revisions, selections,
+        retry_of=job_id, inherited_assets=inherited_assets,
+    )
+    fingerprint = json.dumps(plan, sort_keys=True, separators=(",", ":"))
+    try:
+        retry_id, state, reused = pipeline_db.create_or_reuse_preview_job(
+            str(previous["video_id"]), request.request_id, fingerprint, plan
+        )
+    except ValueError as exc:
+        raise BrandConfigError(str(exc)) from exc
+    if not reused:
+        background.add_task(jobs.run_media_preview, retry_id)
+    return JobAccepted(
+        job_id=retry_id, video_id=str(previous["video_id"]), state=state,
+        brand_revisions=brand_revisions, reused=reused,
+    )
+
+
 @app.post("/media-revision/jobs", response_model=JobAccepted, status_code=202)
 def create_media_revision_job(
     request: MediaRevisionJobRequest, background: BackgroundTasks
@@ -386,3 +539,16 @@ def read_job(job_id: str) -> JSONResponse:
     if job is None:
         return JSONResponse(status_code=404, content={"error": f"no job {job_id!r}"})
     return JSONResponse(content=job)
+
+
+@app.post("/jobs/{job_id}/cancel", response_model=CancelledJob)
+def cancel_job(job_id: str) -> CancelledJob:
+    job = pipeline_db.get_job(job_id)
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": f"no job {job_id!r}"})
+    if str(job["kind"]) != "media_preview":
+        raise BrandConfigError("only media preview jobs can be cancelled through this endpoint")
+    if str(job["state"]) not in ("queued", "running", "cancelled"):
+        raise BrandConfigError("preview job has already finished")
+    pipeline_db.cancel_job(job_id)
+    return CancelledJob(job_id=job_id, state="cancelled")

@@ -474,7 +474,20 @@ export default function BrandEditorPage() {
       if (stored.kind === "audio") {
         setBrand((current) => ({
           ...current,
-          signature_music: { file: stored.file, gain_db: -18, duck_db: -12 },
+          signature_music: {
+            file: stored.file,
+            volume_db: -24,
+            loop: true,
+            fade_in_s: 0.75,
+            fade_out_s: 1,
+            ducking: {
+              enabled: true,
+              threshold: 0.02,
+              ratio: 8,
+              attack_ms: 20,
+              release_ms: 450,
+            },
+          },
         }));
         setStatus(`Đã tải nhạc hiệu ${stored.file}.`);
         return;

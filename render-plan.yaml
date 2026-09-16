@@ -1,0 +1,10 @@
+version: 1
+video_id: hS3VXBeEv0I
+
+# Local test input only. The runner validates this file then sends JSON to
+# render-service; this file is never read by the service itself.
+brands:
+  an-so:
+    revision: latest
+    variants: vertical # all | landscape | vertical
+    chunks: [1]       # one-based; allowed for all and vertical only

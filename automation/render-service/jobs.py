@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # The kinds this service performs, and therefore the only ones it may declare
 # dead on startup. A service that reaped every unfinished row would kill the
 # other services' live jobs every time it restarted.
-OWNED_KINDS = ("voice", "render", "media_revision")
+OWNED_KINDS = ("voice", "render", "media_revision", "media_preview")
 
 
 def reap_orphans() -> None:
@@ -35,9 +35,24 @@ def reap_orphans() -> None:
     for job in pipeline_db.unfinished_jobs(OWNED_KINDS):
         job_id = str(job["job_id"])
         logger.warning("job %s was orphaned by a restart; failing it", job_id)
+        result = None
+        if str(job.get("kind")) == "media_preview":
+            plan = pipeline_db.preview_plan_for_job(job_id)
+            if plan is not None:
+                # The previous worker is gone, so no target can be claimed as
+                # verified by this execution.  The frozen plan lets the retry
+                # endpoint rebuild only its requested targets without asking
+                # ``latest`` again.
+                result = {
+                    "preview": True,
+                    **plan,
+                    "assets": list(plan.get("inherited_assets") or []),
+                    "failures": [],
+                }
         pipeline_db.finish_job(
             job_id,
             "failed",
+            result=result,
             error="render-service restarted while this job was running, "
             "so the work was lost",
         )
@@ -176,6 +191,62 @@ def run_media_revision(
                 error="media revision needs action; inspect its typed failures",
                 warnings=media_manifest.warnings,
             )
+    _notify(job_id)
+
+
+def run_media_preview(job_id: str) -> None:
+    """Render selected operator-preview targets without changing delivery state."""
+    plan = pipeline_db.preview_plan_for_job(job_id)
+    if plan is None:
+        pipeline_db.finish_job(job_id, "failed", error="preview job has no frozen plan")
+        _notify(job_id)
+        return
+    video_id = str(plan["video_id"])
+    brand_revisions = {
+        str(brand_id): int(revision)
+        for brand_id, revision in dict(plan["brand_revisions"]).items()
+    }
+    selections = {
+        str(brand_id): dict(selection)
+        for brand_id, selection in dict(plan["selections"]).items()
+    }
+    inherited_assets = list(plan.get("inherited_assets") or [])
+    pipeline_db.mark_running(job_id)
+    if pipeline_db.is_cancelled(job_id):
+        _notify(job_id)
+        return
+    try:
+        assets, failures, was_cancelled = variants.render_brand_preview(
+            video_id,
+            job_id,
+            brand_revisions=brand_revisions,
+            selections=selections,
+            on_progress=lambda done: pipeline_db.set_progress(job_id, done),
+            cancelled=lambda: pipeline_db.is_cancelled(job_id),
+        )
+    except Exception as exc:  # worker boundary
+        logger.exception("preview job %s failed", job_id)
+        if not pipeline_db.is_cancelled(job_id):
+            pipeline_db.finish_job(job_id, "failed", error=f"{type(exc).__name__}: {exc}")
+    else:
+        if not was_cancelled and not pipeline_db.is_cancelled(job_id):
+            result = {
+                "video_id": video_id,
+                "preview": True,
+                "brand_revisions": brand_revisions,
+                "selections": selections,
+                "retry_of": plan.get("retry_of"),
+                # A retry only encodes failed targets.  Valid siblings remain
+                # at their original immutable preview paths and travel in this
+                # result as inherited evidence instead of being re-rendered.
+                "assets": [*inherited_assets, *[asset.model_dump(mode="json") for asset in assets]],
+                "failures": failures,
+            }
+            if failures:
+                pipeline_db.finish_job(job_id, "failed", result=result,
+                                       error="preview needs action; inspect failed targets")
+            else:
+                pipeline_db.finish_job(job_id, "done", result=result)
     _notify(job_id)
 
 

@@ -48,6 +48,10 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 - [ ] [Brand profiles and branded variants](brand_profiles/todo.md)
 - [x] [Media variants and manifest](media_variants_manifest/todo.md) - verified
   under the user-approved layered duration strategy.
+- [ ] [Selective render previews and brand media](selective_render_previews/todo.md)
+  - root YAML plans can render only chosen brand variants/chunks without
+    creating delivery-ready media; ratio-specific backgrounds and the
+    brand-level signature-music editor are included.
 - [ ] [Platform sandbox](platform_sandbox/todo.md)
 
 ## P1 — first reliable YouTube vertical slice

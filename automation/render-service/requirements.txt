@@ -6,6 +6,7 @@ httpx==0.28.1
 # container, and installing pytest by hand after every rebuild is a step that
 # gets skipped exactly when it matters.
 pytest==8.3.4
+PyYAML==6.0.2
 # Vietnamese TTS on ONNX Runtime — no torch, so 0 MB of VRAM. That is the
 # whole reason it was picked over XTTS-v2: all 6 GB stays with Whisper.
 zerotts==0.1.2

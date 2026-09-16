@@ -62,9 +62,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     video_id     TEXT NOT NULL,
     kind         TEXT NOT NULL
                  CHECK (kind IN ('ingest', 'transcribe', 'translate', 'voice',
-                                'render', 'metadata', 'media_revision')),
+                                'render', 'metadata', 'media_revision', 'media_preview')),
     state        TEXT NOT NULL DEFAULT 'queued'
-                 CHECK (state IN ('queued', 'running', 'done', 'failed')),
+                 CHECK (state IN ('queued', 'running', 'done', 'failed', 'cancelled')),
     progress     REAL NOT NULL DEFAULT 0,
     -- The finished payload, as JSON. Kept here as well as sent in the callback
     -- so a lost callback is recoverable by polling instead of by re-running the
@@ -81,6 +81,22 @@ CREATE INDEX IF NOT EXISTS idx_videos_stage   ON videos (stage);
 CREATE INDEX IF NOT EXISTS idx_chunks_ready   ON chunks (ready_to_upload, status);
 CREATE INDEX IF NOT EXISTS idx_jobs_state     ON jobs (state, kind);
 CREATE INDEX IF NOT EXISTS idx_jobs_video     ON jobs (video_id);
+
+CREATE TABLE IF NOT EXISTS preview_requests (
+    request_id TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    job_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Preview plans are frozen when accepted.  Unlike preview_requests this table
+-- also exists for operator submissions without a request_id, so a worker
+-- restart can offer a retry without resolving a floating brand revision again.
+CREATE TABLE IF NOT EXISTS preview_plans (
+    job_id TEXT PRIMARY KEY,
+    plan TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- One deterministic metadata revision per transcript/prompt/model combination.
 -- Items are selected independently so a bad chunk does not regenerate the

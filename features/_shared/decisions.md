@@ -228,6 +228,26 @@ Last updated: 2026-09-16
   handoff milestone. The imported inactive workflow plus canonical/live-export
   contract tests are sufficient for Step 2.
 
+## Selective render previews
+
+- A root-level `render-plan.yaml` is local operator input for a selective
+  render preview. It is not a delivery manifest, is never read directly by the
+  render service, and contains no credentials. A local runner validates it and
+  sends a typed request to the render-service preview endpoint.
+- A plan selects one or more brand revisions and `all`, `landscape`, or
+  `vertical` variants. It may further select one or more one-based chunk
+  indices for the vertical variant, such as `chunks: [1]`. `all` includes the
+  whole landscape asset and only the selected vertical chunks when a chunk list
+  is present.
+- Preview outputs are kept outside delivery revision paths and never update
+  `media-manifest.json`, campaign state, approval state, or the `rendered`
+  pipeline stage. A preview cannot be published.
+- A brand may use distinct background assets in its landscape and vertical
+  layouts. A layout change creates a new immutable brand revision.
+- Signature music is one optional, versioned brand-level asset shared by both
+  layouts for now. It has explicit loop, gain, fade, and speech-ducking
+  settings; separate music by ratio is out of scope until explicitly decided.
+
 ## Pending decisions
 
 - Whether Shopee Affiliate Open API credentials are available.
