@@ -32,6 +32,16 @@ class Settings:
     # a GPU heading - see reports/tts-spike.md. Asking by name lets the loader
     # check what it actually got.
     tts_provider: str
+    # How many delivery assets may encode at once. One ffmpeg render keeps
+    # only 2.5 of this box's 12 logical cores busy: its filter graph is a
+    # chain, and `libass`, `drawtext`, `alphamerge` and `overlay` do not slice
+    # across cores. The assets of a revision are independent files, so the
+    # idle cores are reachable by running several of them. Measured on the
+    # 9:16 an-so layout: 12.34 s per chunk at 1 worker, 8.20 s at 2, 6.64 s at
+    # 4 - 1.86x throughput. It stops there because 12 logical cores are 6
+    # physical ones, and 6 is where the box saturates. NVENC is not the limit:
+    # at 4 workers the encoder sat at 33 % and the GPU held 1.1 GB of 6 GB.
+    render_workers: int
     # The needed-rate band. Outside it the segment is still fitted — timing is
     # never sacrificed — but it is reported. See timing.py.
     min_ratio: float
@@ -95,6 +105,7 @@ def load_settings() -> Settings:
         tts_threads=_int("TTS_THREADS", 4),
         tts_workers=_int("TTS_WORKERS", 1),
         tts_provider=_provider("TTS_PROVIDER", "cpu"),
+        render_workers=max(_int("RENDER_WORKERS", 3), 1),
         min_ratio=_float("TTS_MIN_RATIO", 0.75),
         max_ratio=_float("TTS_MAX_RATIO", 1.35),
         rvm_model_dir=Path(os.environ.get("RVM_MODEL_DIR", "/models/rvm")),

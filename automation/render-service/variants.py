@@ -2,17 +2,82 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 import brand
 import brands as brand_layouts
 import library
 import manifest
 import render
+from config import settings
 from errors import NoChunksError, RenderError
 
 
 Progress = Callable[[float], None]
+
+
+def _render_in_parallel(
+    builds: list[tuple[manifest.AssetRole, str, str | None, Callable[[], manifest.MediaAsset]]],
+    on_progress: Progress | None,
+    video_id: str,
+    render_revision: int,
+) -> tuple[list[manifest.MediaAsset], list[manifest.ManifestFailure]]:
+    """Encode independent delivery assets side by side, in a fixed order.
+
+    Every asset of a revision is its own file built from its own frozen
+    layout, so nothing here shares state and the only reason they ran one
+    after another was that the loop was written that way. One ffmpeg leaves
+    most of this box idle - see `Settings.render_workers` - so the spare cores
+    are worth more than the simplicity of a serial loop.
+
+    Results are collected by position rather than by completion, so the
+    manifest lists the same assets in the same order whatever the workers do,
+    and one asset failing still leaves its verified peers in place.
+    """
+    assets: list[manifest.MediaAsset | None] = [None] * len(builds)
+    failures: list[tuple[int, manifest.ManifestFailure]] = []
+    lock = threading.Lock()
+    completed = 0
+    total = len(builds) or 1
+
+    # Probed once here rather than raced inside the workers: the probe runs a
+    # real encode, and several at once would report the same answer after
+    # doing the same work several times.
+    render.encoder_choice()
+
+    def work(index: int) -> None:
+        nonlocal completed
+        role, content_item_id, brand_id, build = builds[index]
+        try:
+            asset = build()
+        except Exception as exc:  # one bad asset must not discard successful peers
+            failure = _failure(
+                video_id, render_revision, role, content_item_id, brand_id, exc
+            )
+            with lock:
+                failures.append((index, failure))
+        else:
+            assets[index] = asset
+        with lock:
+            completed += 1
+            done = completed
+        if on_progress:
+            on_progress(done / total)
+
+    workers = max(min(settings.render_workers, len(builds)), 1)
+    if workers == 1:
+        for index in range(len(builds)):
+            work(index)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(work, range(len(builds))))
+
+    return (
+        [asset for asset in assets if asset is not None],
+        [failure for _, failure in sorted(failures)],
+    )
 
 
 def _failure(
@@ -347,30 +412,29 @@ def render_brand_revision(
     fields = {"title": pipeline_db.title_for(video_id)}
     base_warnings = list(voice_manifest.get("warnings") or [])
 
-    total_assets = (1 + len(chunks)) * len(brand_ids)
-    completed = 0
-    assets: list[manifest.MediaAsset] = []
-    failures: list[manifest.ManifestFailure] = []
-
-    def progressed() -> None:
-        nonlocal completed
-        completed += 1
-        if on_progress:
-            on_progress(completed / total_assets)
-
+    # One flat list first, then encoded side by side. The nesting below is
+    # only an ordering - no asset needs any other asset - so building the list
+    # separately is what lets the encodes overlap without changing which
+    # assets a revision contains or the order the manifest lists them in.
+    builds: list[
+        tuple[manifest.AssetRole, str, str | None, Callable[[], manifest.MediaAsset]]
+    ] = []
     for brand_id in brand_ids:
         landscape = configs[brand_id]["landscape"]
         vertical = configs[brand_id]["vertical"]
-        try:
-            assets.append(
-                _reuse_or_render(
+        builds.append(
+            (
+                "branded_whole",
+                manifest.WHOLE_ITEM,
+                brand_id,
+                lambda brand_id=brand_id, landscape=landscape: _reuse_or_render(
                     video_id=video_id,
                     render_revision=render_revision,
                     role="branded_whole",
                     content_item_id=manifest.WHOLE_ITEM,
                     expected_duration_s=source.duration_s,
                     brand_id=brand_id,
-                    build=lambda brand_id=brand_id, landscape=landscape: render.render_brand_variant(
+                    build=lambda: render.render_brand_variant(
                         video_id,
                         render_revision,
                         landscape,
@@ -379,34 +443,26 @@ def render_brand_revision(
                         fields=fields,
                         warnings=base_warnings,
                     ),
-                )
+                ),
             )
-        except Exception as exc:  # one bad asset must not discard successful peers
-            failures.append(
-                _failure(
-                    video_id,
-                    render_revision,
-                    "branded_whole",
-                    manifest.WHOLE_ITEM,
-                    brand_id,
-                    exc,
-                )
-            )
-        progressed()
-
+        )
         for chunk in chunks:
             name = str(chunk["name"])
             duration_s = float(chunk["end_s"]) - float(chunk["start_s"])
-            try:
-                assets.append(
-                    _reuse_or_render(
+            builds.append(
+                (
+                    "branded_vertical",
+                    name,
+                    brand_id,
+                    lambda chunk=chunk, name=name, duration_s=duration_s,
+                    brand_id=brand_id, vertical=vertical: _reuse_or_render(
                         video_id=video_id,
                         render_revision=render_revision,
                         role="branded_vertical",
                         content_item_id=name,
                         expected_duration_s=duration_s,
                         brand_id=brand_id,
-                        build=lambda chunk=chunk, brand_id=brand_id, vertical=vertical: render.render_brand_variant(
+                        build=lambda: render.render_brand_variant(
                             video_id,
                             render_revision,
                             vertical,
@@ -420,20 +476,13 @@ def render_brand_revision(
                             },
                             warnings=base_warnings,
                         ),
-                    )
+                    ),
                 )
-            except Exception as exc:
-                failures.append(
-                    _failure(
-                        video_id,
-                        render_revision,
-                        "branded_vertical",
-                        name,
-                        brand_id,
-                        exc,
-                    )
-                )
-            progressed()
+            )
+
+    assets, failures = _render_in_parallel(
+        builds, on_progress, video_id, render_revision
+    )
 
     state: manifest.ManifestState = "needs_action" if failures else "ready"
     result = manifest.MediaManifest(

@@ -449,7 +449,7 @@ def _host_layer(
 
 
 def _image_layer(
-    image: dict, geometry: presets.Geometry, duration_s: float, index: int
+    image: dict, geometry: presets.Geometry, index: int
 ) -> tuple[list[str], list[str], str, str]:
     """One still placed in its own rectangle on the canvas.
 
@@ -459,7 +459,14 @@ def _image_layer(
     """
     box = _canvas_box(image, geometry.canvas_w, geometry.canvas_h)
     label = f"img{index}"
-    args = ["-loop", "1", "-t", f"{duration_s:.3f}", "-i", str(image["path"])]
+    # One frame, not one per output frame. `-loop 1` made ffmpeg re-decode the
+    # still and re-run its scale/alpha chain for every frame of the render:
+    # a brand carrying a 1536x2752 background and a 2048x2048 watermark spent
+    # 88 % of a measured 9:16 chunk doing that. `overlay` repeats its last
+    # secondary frame for the rest of the main stream by default, so a single
+    # decoded frame composites identically - measured SSIM 1.000000 on every
+    # frame of a 20-second chunk - for 1/480th of the decode and scale work.
+    args = ["-i", str(image["path"])]
     opacity = float(image.get("opacity", 1.0))
     if str(image.get("fit", "contain")) == "fill":
         scale = f"scale={box.w}:{box.h}"
@@ -528,9 +535,7 @@ def compose_clean(
     # an operator put a frame over the footage and the logo under it.
     for image in preset.get("images") or []:
         index = _FIRST_OPTIONAL_INPUT + extra_inputs.count("-i")
-        args, image_steps, label, overlay = _image_layer(
-            image, geometry, duration_s, index
-        )
+        args, image_steps, label, overlay = _image_layer(image, geometry, index)
         extra_inputs.extend(args)
         steps.extend(image_steps)
         layers.append(
