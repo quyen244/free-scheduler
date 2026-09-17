@@ -345,11 +345,9 @@ def _freeze_preview_plan(
         published = brands.load_published(brand_id, revision)
         selection = selections[brand_id]
         variants = str(selection["variants"])
-        for aspect in (
-            ("landscape", "vertical") if variants == "all"
-            else ("landscape",) if variants == "landscape" else ("vertical",)
-        ):
-            brands.render_config(published, aspect)
+        # Every new preview renders the brand landscape once and cuts chunks
+        # from it; the legacy vertical layout is not a delivery dependency.
+        brands.render_config(published, "landscape")
         selected_chunks = selection.get("chunks") or []
         if not set(int(chunk) for chunk in selected_chunks).issubset(available_chunks):
             missing = sorted(set(int(chunk) for chunk in selected_chunks) - available_chunks)
@@ -406,9 +404,9 @@ def _retry_targets(result: dict[str, object]) -> tuple[dict[str, int], dict[str,
         if whole and chunks:
             selection: dict[str, object] = {"variants": "all", "chunks": chunks}
         elif whole:
-            selection = {"variants": "landscape"}
+            selection = {"variants": "whole"}
         else:
-            selection = {"variants": "vertical", "chunks": chunks}
+            selection = {"variants": "chunks", "chunks": chunks}
         revisions[brand_id] = source_revisions[brand_id]
         selections[brand_id] = selection
     return revisions, selections
@@ -488,15 +486,13 @@ def create_media_revision_job(
         # caller now instead of failing a background job minutes later.
         for brand_id, brand_revision in brand_revisions.items():
             published = brands.load_published(brand_id, brand_revision)
-            for aspect in ("landscape", "vertical"):
-                brands.render_config(published, aspect)
+            brands.render_config(published, "landscape")
     elif request.preset_id is not None:
         # Published editor config is validated (including allowlisted assets)
         # before a job row exists. A malformed revision is caller input, not a
         # background failure that n8n must wait to discover.
         visual_preset.load_published(request.preset_id, request.preset_revision or 0)
     else:
-        library.load_preset(request.vertical_preset)
         library.load_preset(request.landscape_preset)
     library.load_voice_track(request.video_id)
     if not pipeline_db.chunks_for(request.video_id):
@@ -517,7 +513,6 @@ def create_media_revision_job(
         request.video_id,
         request.render_revision,
         request.brand_ids,
-        request.vertical_preset,
         request.landscape_preset,
         request.metadata_revision_id,
         request.preset_id,

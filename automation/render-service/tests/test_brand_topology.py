@@ -182,6 +182,28 @@ def test_the_music_bed_is_ducked_by_the_voice_itself():
     assert graph.endswith("[aout]")
 
 
+def test_music_peak_control_accepts_a_generated_music_gain_before_the_voice_sidechain():
+    graph = render._music_graph(
+        {
+            **MUSIC,
+            "peak_control": {
+                "enabled": True,
+                "target_rms": 0.029,
+                "window_ms": 400,
+                "attack_ms": 20.0,
+                "release_ms": 350.0,
+            },
+        },
+        duration_s=30.0,
+        music_input=5,
+        gain_input=6,
+    )
+
+    assert "[6:a]aresample=48000,pan=stereo|c0=c0|c1=c0" in graph
+    assert "[music_raw][music_gain]amultiply[music]" in graph
+    assert graph.index("amultiply[music]") < graph.index("[music][sidechain]sidechaincompress=")
+
+
 def test_fades_never_overrun_a_short_asset():
     """A 1-second chunk cannot carry a 0.75s fade in and a 1.0s fade out."""
     graph = render._music_graph(MUSIC, duration_s=1.0, music_input=3)

@@ -22,7 +22,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 import library
 
 
-SCHEMA_VERSION = "media-manifest.v1"
+SCHEMA_VERSION = "media-manifest.v2"
+LEGACY_SCHEMA_VERSION = "media-manifest.v1"
 MANIFEST_NAME = "media-manifest.json"
 WHOLE_ITEM = "whole"
 
@@ -31,13 +32,14 @@ AssetRole = Literal[
     "clean_vertical",
     "branded_whole",
     "branded_vertical",
+    "branded_landscape_chunk",
 ]
 ManifestState = Literal["building", "validating", "ready", "needs_action", "stale"]
 # How the delivery assets in a manifest were produced. `clean_lineage` renders
 # brand-neutral masters once and dresses them per brand. `brand_owned` renders
 # each brand straight from the source, because a `brand.v1` layout owns the
 # footage rectangle, the blur regions and the subtitle and so cannot share one.
-Topology = Literal["clean_lineage", "brand_owned"]
+Topology = Literal["clean_lineage", "brand_owned", "landscape_chunks"]
 
 _BRAND_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _PART_PATTERN = re.compile(r"^part_([1-9][0-9]*)$")
@@ -82,13 +84,18 @@ class MediaAsset(StrictModel):
     @model_validator(mode="after")
     def validate_role(self) -> "MediaAsset":
         vertical = self.role.endswith("vertical")
+        landscape_chunk = self.role == "branded_landscape_chunk"
         branded = self.role.startswith("branded")
 
-        if vertical:
+        if vertical or landscape_chunk:
             if _PART_PATTERN.fullmatch(self.content_item_id) is None:
-                raise ValueError("vertical assets require content_item_id part_<n>")
+                raise ValueError("chunk assets require content_item_id part_<n>")
+        if vertical:
             if (self.probe.width, self.probe.height) != (1080, 1920):
                 raise ValueError("vertical assets must be 1080x1920")
+        elif landscape_chunk:
+            if (self.probe.width, self.probe.height) != (1920, 1080):
+                raise ValueError("landscape chunk assets must be 1920x1080")
         else:
             if self.content_item_id != WHOLE_ITEM:
                 raise ValueError("whole assets require content_item_id 'whole'")
@@ -116,7 +123,10 @@ class ManifestFailure(StrictModel):
 
 
 class MediaManifest(StrictModel):
-    schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
+    # The default remains v1 so callers opening an historical fixture without a
+    # schema marker keep its original meaning. New render code always passes v2
+    # explicitly; no v1 asset is ever rewritten into a v2 manifest.
+    schema_version: Literal[LEGACY_SCHEMA_VERSION, SCHEMA_VERSION] = LEGACY_SCHEMA_VERSION
     video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
     render_revision: int = Field(ge=1)
     metadata_revision_id: str | None = None
@@ -145,7 +155,16 @@ class MediaManifest(StrictModel):
             raise ValueError("brand_ids must be unique")
         for brand_id in self.brand_ids:
             _validate_brand_id(brand_id)
-        if self.topology == "brand_owned":
+        if self.schema_version == SCHEMA_VERSION:
+            if self.topology != "landscape_chunks":
+                raise ValueError("a v2 manifest must use the landscape_chunks topology")
+            if sorted(self.brand_revisions) != sorted(self.brand_ids):
+                raise ValueError(
+                    "a landscape-chunk manifest must name one published revision per brand"
+                )
+            if any(revision < 1 for revision in self.brand_revisions.values()):
+                raise ValueError("brand revisions are positive integers")
+        elif self.topology == "brand_owned":
             if sorted(self.brand_revisions) != sorted(self.brand_ids):
                 raise ValueError(
                     "a brand-owned manifest must name one published revision per brand"
@@ -191,14 +210,29 @@ class MediaManifest(StrictModel):
 
     def _validate_ready_topology(self) -> None:
         expected: set[tuple[str, str, str | None]] = set()
-        if self.topology == "clean_lineage":
-            expected.add(("clean_whole", WHOLE_ITEM, None))
-            expected.update(("clean_vertical", part, None) for part in self.chunk_names)
-        for brand_id in self.brand_ids:
-            expected.add(("branded_whole", WHOLE_ITEM, brand_id))
-            expected.update(
-                ("branded_vertical", part, brand_id) for part in self.chunk_names
-            )
+        if self.schema_version == SCHEMA_VERSION:
+            # Every v2 delivery asset is 16:9, and a part is a cut of its own
+            # brand's whole. There is no clean master and no vertical file, so
+            # the v1 expectations below must not be added on top - doing that
+            # would demand assets this topology never produces and leave every
+            # revision unable to reach `ready`.
+            for brand_id in self.brand_ids:
+                expected.add(("branded_whole", WHOLE_ITEM, brand_id))
+                expected.update(
+                    ("branded_landscape_chunk", part, brand_id)
+                    for part in self.chunk_names
+                )
+        else:
+            if self.topology == "clean_lineage":
+                expected.add(("clean_whole", WHOLE_ITEM, None))
+                expected.update(
+                    ("clean_vertical", part, None) for part in self.chunk_names
+                )
+            for brand_id in self.brand_ids:
+                expected.add(("branded_whole", WHOLE_ITEM, brand_id))
+                expected.update(
+                    ("branded_vertical", part, brand_id) for part in self.chunk_names
+                )
 
         actual = {
             (asset.role, asset.content_item_id, asset.brand_id)
@@ -210,6 +244,23 @@ class MediaManifest(StrictModel):
             raise ValueError(
                 f"ready topology mismatch; missing={missing}, unexpected={unexpected}"
             )
+
+        if self.schema_version == SCHEMA_VERSION:
+            by_identity = {
+                (asset.role, asset.content_item_id, asset.brand_id): asset
+                for asset in self.assets
+            }
+            for brand_id in self.brand_ids:
+                whole = by_identity[("branded_whole", WHOLE_ITEM, brand_id)]
+                if whole.lineage_asset_id is not None:
+                    raise ValueError("a v2 branded whole has no parent asset")
+                for part in self.chunk_names:
+                    chunk = by_identity[("branded_landscape_chunk", part, brand_id)]
+                    if chunk.lineage_asset_id != whole.asset_id:
+                        raise ValueError(
+                            f"{chunk.asset_id} must reference branded whole {whole.asset_id}"
+                        )
+            return
 
         if self.topology == "brand_owned":
             # Nothing was derived, so nothing may claim to be. The set check
@@ -286,7 +337,11 @@ def expected_asset_path(
         file_name = "whole-16x9.mp4"
     else:
         _validate_part(content_item_id)
-        file_name = f"{content_item_id}-9x16.mp4"
+        file_name = (
+            f"{content_item_id}-16x9.mp4"
+            if role == "branded_landscape_chunk"
+            else f"{content_item_id}-9x16.mp4"
+        )
 
     if role.startswith("clean"):
         if brand_id is not None:
@@ -298,6 +353,8 @@ def expected_asset_path(
 
     if role.endswith("vertical"):
         path /= "vertical"
+    elif role == "branded_landscape_chunk":
+        path /= "landscape"
     return _within_video(video_id, path / file_name)
 
 
@@ -307,11 +364,17 @@ def deterministic_asset_id(
     role: AssetRole,
     content_item_id: str,
     brand_id: str | None = None,
+    schema_version: str | None = None,
 ) -> str:
     # Validation and canonical spelling come from the path contract.
     expected_asset_path(video_id, render_revision, role, content_item_id, brand_id)
+    version = schema_version or (
+        SCHEMA_VERSION if role == "branded_landscape_chunk" else LEGACY_SCHEMA_VERSION
+    )
+    if version not in (LEGACY_SCHEMA_VERSION, SCHEMA_VERSION):
+        raise ValueError("unknown manifest schema version")
     identity = "|".join(
-        [SCHEMA_VERSION, video_id, str(render_revision), role, content_item_id, brand_id or "-"]
+        [version, video_id, str(render_revision), role, content_item_id, brand_id or "-"]
     )
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
 
@@ -328,6 +391,7 @@ def inspect_expected_asset(
     duration_tolerance_s: float = 0.5,
     warnings: list[str] | None = None,
     path: Path | None = None,
+    schema_version: str | None = None,
 ) -> MediaAsset:
     path = path or expected_asset_path(
         video_id, render_revision, role, content_item_id, brand_id
@@ -388,7 +452,7 @@ def inspect_expected_asset(
 
     return MediaAsset(
         asset_id=deterministic_asset_id(
-            video_id, render_revision, role, content_item_id, brand_id
+            video_id, render_revision, role, content_item_id, brand_id, schema_version
         ),
         video_id=video_id,
         render_revision=render_revision,

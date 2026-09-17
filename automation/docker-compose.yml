@@ -217,6 +217,11 @@ services:
       # "Cannot load libnvidia-encode.so.1" and the render falls back to CPU
       # libx264. `video` is what makes the hardware encoder actually reachable.
       NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+      # Text layers the renderer will not draw, by binding or by layer id.
+      # Confirmed 2026-09-17: a re-up carries its title in the platform post,
+      # not burned into the frame. The layouts keep their title layer, so an
+      # empty value here brings it back with no brand revision.
+      RENDER_FROZEN_TEXT: title
     healthcheck:
       test:
         - CMD-SHELL

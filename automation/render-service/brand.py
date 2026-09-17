@@ -44,7 +44,13 @@ class SpeechDucking(StrictModel):
 
 class SignatureMusic(StrictModel):
     file: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
-    volume_db: float = Field(ge=-50, le=-12)
+    # The ceiling is anti-clipping, not a loudness rule. `volume_db` is absolute
+    # gain on the mp3, so the gain that lands on a given share of the narration
+    # depends on how that track was mastered - a quieter file needs more of it.
+    # `-12` was a proxy for "stay under the voice" from when the bed sat at
+    # `-24`; the confirmed 45 % level is `-7.9` for `an-so`, which it refused.
+    # See `features/_shared/decisions.md`, "Signature music level".
+    volume_db: float = Field(ge=-50, le=0)
     loop: Literal[True] = True
     fade_in_s: float = Field(ge=0, le=5)
     fade_out_s: float = Field(ge=0, le=5)

@@ -9,9 +9,11 @@ directory set to the chunk folder and names its files relatively.
 
 import json
 import logging
+import math
 import shutil
 import subprocess
 import time
+from array import array
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -23,6 +25,7 @@ import preset as presets
 import visual_preset
 import brand as brands
 import subs
+from config import settings
 from errors import RenderError
 
 logger = logging.getLogger(__name__)
@@ -575,6 +578,16 @@ def compose_clean(
 
     for layer in preset.get("text_layers") or []:
         binding = str(layer.get("source", "static"))
+        # Frozen service-wide, not removed from the layout: the layer keeps its
+        # place so the switch can be reversed without editing every brand. Both
+        # names are checked because a title can be a bound field or a static
+        # string that happens to be the title layer.
+        if binding in settings.frozen_text or str(layer.get("id", "")) in settings.frozen_text:
+            warnings.append(
+                f"text layer {layer.get('id')!r} was not drawn: RENDER_FROZEN_TEXT "
+                f"freezes {sorted(settings.frozen_text)}"
+            )
+            continue
         value = (
             str(layer.get("text") or "")
             if binding == "static"
@@ -1012,8 +1025,65 @@ def render_clean_vertical(
     )
 
 
-def _music_graph(music: dict, duration_s: float, music_input: int) -> str:
-    """Mix the brand's bed under the voice, ducked by the voice itself.
+_MUSIC_ANALYSIS_RATE = 16_000
+_MUSIC_ENVELOPE_RATE = 50
+
+
+def _write_music_peak_envelope(
+    music_path: Path,
+    output: Path,
+    duration_s: float,
+    volume_db: float,
+    peak_control: dict,
+) -> None:
+    """Write a small gain track that limits music RMS without reading the voice.
+
+    Standard FFmpeg compressors were measured on this track and either missed
+    its musical swell or lowered the ordinary bed too. We therefore measure the
+    post-gain music in fixed windows and feed a 50 Hz control track to
+    ``amultiply``. Attack applies immediately; release is eased, so the bed
+    does not jump back up after a loud bar.
+    """
+    window_s = int(peak_control["window_ms"]) / 1000.0
+    window_samples = max(1, round(window_s * _MUSIC_ANALYSIS_RATE))
+    decoded = subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-stream_loop", "-1", "-i", str(music_path),
+            "-af", f"volume={volume_db}dB", "-t", f"{duration_s:.3f}",
+            "-ac", "1", "-ar", str(_MUSIC_ANALYSIS_RATE), "-f", "f32le", "-",
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+    samples = array("f")
+    samples.frombytes(decoded)
+    target = float(peak_control["target_rms"])
+    attack_s = float(peak_control["attack_ms"]) / 1000.0
+    release_s = float(peak_control["release_ms"]) / 1000.0
+    per_window = max(1, round(window_s * _MUSIC_ENVELOPE_RATE))
+    gain = 1.0
+    values = array("f")
+    for start in range(0, len(samples), window_samples):
+        frame = samples[start : start + window_samples]
+        if not frame:
+            continue
+        rms = math.sqrt(sum(float(sample) ** 2 for sample in frame) / len(frame))
+        wanted = min(1.0, target / rms) if rms > 0 else 1.0
+        seconds = attack_s if wanted < gain else release_s
+        alpha = min(1.0, 1.0 / max(seconds * _MUSIC_ENVELOPE_RATE, 1.0))
+        for _ in range(per_window):
+            gain += (wanted - gain) * alpha
+            values.append(gain)
+    expected = math.ceil(duration_s * _MUSIC_ENVELOPE_RATE)
+    if len(values) < expected:
+        values.extend([gain] * (expected - len(values)))
+    output.write_bytes(values[:expected].tobytes())
+
+
+def _music_graph(
+    music: dict, duration_s: float, music_input: int, gain_input: int | None = None
+) -> str:
+    """Mix the brand's bed under the voice, with optional music-only control.
 
     The clean path has no music because a clean master is shared; here the bed
     belongs to the brand and the render is already brand-specific, so the mix
@@ -1024,6 +1094,14 @@ def _music_graph(music: dict, duration_s: float, music_input: int) -> str:
     fade_out_start = max(duration_s - fade_out, 0)
     ducking = music.get("ducking") or {}
     stereo = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+    music_tail = "asetpts=PTS-STARTPTS[music];"
+    if gain_input is not None:
+        music_tail = (
+            "asetpts=PTS-STARTPTS[music_raw];"
+            f"[{gain_input}:a]aresample=48000,pan=stereo|c0=c0|c1=c0,"
+            f"atrim=0:{duration_s:.3f}[music_gain];"
+            "[music_raw][music_gain]amultiply[music];"
+        )
     return (
         f"[{_VOICE_INPUT}:a]{stereo},asetpts=PTS-STARTPTS,apad,"
         f"atrim=0:{duration_s:.3f},asplit=2[speech][sidechain];"
@@ -1031,7 +1109,7 @@ def _music_graph(music: dict, duration_s: float, music_input: int) -> str:
         f"atrim=0:{duration_s:.3f},"
         f"afade=t=in:st=0:d={fade_in:.3f},"
         f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f},"
-        "asetpts=PTS-STARTPTS[music];"
+        f"{music_tail}"
         f"[music][sidechain]sidechaincompress="
         f"threshold={float(ducking.get('threshold', 0.02)):.6f}:"
         f"ratio={float(ducking.get('ratio', 8)):.3f}:"
@@ -1055,13 +1133,16 @@ def render_brand_variant(
     warnings: list[str] | None = None,
     output_path: Path | None = None,
     cancelled: Callable[[], bool] | None = None,
+    schema_version: str | None = None,
 ) -> manifests.MediaAsset:
     """Render one delivery asset straight from the source for one brand.
 
     A `brand.v1` layout owns the rectangle the footage sits in, the blur
     regions and the subtitle, so there is no brand-neutral master to derive
     from: everything this brand asked for is composited in a single pass.
-    `chunk` is `None` for the whole 16:9 asset and a chunk row for a 9:16 part.
+    `chunk` is `None` for the whole 16:9 asset and a chunk row for a legacy
+    9:16 part. New delivery revisions render only the whole here, then use
+    `cut_branded_landscape_chunk` so chunks are exact sections of that file.
     """
     whole = chunk is None
     role: manifests.AssetRole = "branded_whole" if whole else "branded_vertical"
@@ -1127,12 +1208,31 @@ def render_brand_variant(
 
     music = config.get("signature_music")
     music_inputs: list[str] = []
+    music_gain_path: Path | None = None
     if music:
         # Appended last so the indices `compose_clean` already handed out to
         # the brand's own stills stay correct.
         music_index = _FIRST_OPTIONAL_INPUT + extra_inputs.count("-i")
         music_inputs = ["-stream_loop", "-1", "-i", str(music["path"])]
-        audio_graph = _music_graph(music, duration_s, music_index)
+        peak_control = music.get("peak_control")
+        gain_index = None
+        if peak_control:
+            music_gain_path = output.parent / f".{stem}.music-gain.f32"
+            _write_music_peak_envelope(
+                Path(music["path"]),
+                music_gain_path,
+                duration_s,
+                float(music["volume_db"]),
+                peak_control,
+            )
+            gain_index = music_index + 1
+            music_inputs.extend(
+                [
+                    "-f", "f32le", "-ar", str(_MUSIC_ENVELOPE_RATE), "-ac", "1",
+                    "-i", str(music_gain_path),
+                ]
+            )
+        audio_graph = _music_graph(music, duration_s, music_index, gain_index)
     else:
         audio_graph = f"[{_VOICE_INPUT}:a]apad[aout]"
 
@@ -1172,6 +1272,9 @@ def render_brand_variant(
             f"brand render of {video_id}/{content_item_id} for {brand_id}: "
             f"{exc.stderr.strip()[-800:]}"
         ) from exc
+    finally:
+        if music_gain_path is not None:
+            music_gain_path.unlink(missing_ok=True)
 
     partial.replace(output)
     return manifests.inspect_expected_asset(
@@ -1183,6 +1286,83 @@ def render_brand_variant(
         brand_id=brand_id,
         warnings=[*(warnings or []), *composed_warnings],
         path=output,
+        schema_version=schema_version,
+    )
+
+
+def cut_branded_landscape_chunk(
+    whole_asset: manifests.MediaAsset,
+    chunk: dict,
+    *,
+    output_path: Path | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> manifests.MediaAsset:
+    """Frame-accurately re-encode one 16:9 delivery chunk from its whole parent."""
+    if whole_asset.role != "branded_whole":
+        raise RenderError("a landscape chunk must be cut from a branded whole asset")
+
+    idx = int(chunk["idx"])
+    content_item_id = str(chunk.get("name") or f"part_{idx + 1}")
+    if content_item_id != f"part_{idx + 1}":
+        raise RenderError(
+            f"chunk index {idx} must be named part_{idx + 1}, not {content_item_id!r}"
+        )
+    start_s = float(chunk["start_s"])
+    duration_s = float(chunk["end_s"]) - start_s
+    if start_s < 0 or duration_s <= 0:
+        raise RenderError(f"{content_item_id} has an invalid cut span")
+    if start_s + duration_s > whole_asset.probe.duration_s + 0.5:
+        raise RenderError(f"{content_item_id} exceeds its branded whole parent duration")
+
+    output = output_path or manifests.expected_asset_path(
+        whole_asset.video_id,
+        whole_asset.render_revision,
+        "branded_landscape_chunk",
+        content_item_id,
+        whole_asset.brand_id,
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    partial = output.with_name(f".{content_item_id}.part.mp4")
+    # Put -ss after the input: ffmpeg decodes from the beginning before cutting,
+    # which is slower than keyframe copy but makes the persisted transcript
+    # boundary the actual first frame of the delivered asset.
+    command = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", whole_asset.path,
+        "-ss", f"{start_s:.3f}", "-t", f"{duration_s:.3f}",
+        "-map", "0:v:0", "-map", "0:a:0",
+        "-vf", "setpts=PTS-STARTPTS", "-af", "asetpts=PTS-STARTPTS",
+        *_encode_args({}),
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart", "-avoid_negative_ts", "make_zero",
+        str(partial),
+    ]
+    try:
+        _run_encode(
+            command,
+            stage="branded_landscape_chunk",
+            content_item_id=content_item_id,
+            media_duration_s=duration_s,
+            cwd=output.parent,
+            cancelled=cancelled,
+        )
+    except subprocess.CalledProcessError as exc:
+        partial.unlink(missing_ok=True)
+        raise RenderError(
+            f"landscape cut of {whole_asset.video_id}/{content_item_id}: "
+            f"{exc.stderr.strip()[-800:]}"
+        ) from exc
+    partial.replace(output)
+    return manifests.inspect_expected_asset(
+        whole_asset.video_id,
+        whole_asset.render_revision,
+        "branded_landscape_chunk",
+        content_item_id,
+        expected_duration_s=duration_s,
+        brand_id=whole_asset.brand_id,
+        lineage_asset_id=whole_asset.asset_id,
+        path=output,
+        schema_version=manifests.SCHEMA_VERSION,
     )
 
 

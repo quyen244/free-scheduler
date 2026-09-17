@@ -271,10 +271,23 @@ def test_needs_action_can_be_replaced_by_ready_without_freezing_bad_history(
     assert json.loads(current_path.read_text(encoding="utf-8"))["state"] == "ready"
 
 
+def _contract(name: str) -> dict:
+    path = Path(__file__).resolve().parents[1] / "contracts" / f"{name}.schema.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def test_committed_json_schema_matches_the_models():
-    schema_path = (
-        Path(__file__).resolve().parents[1]
-        / "contracts"
-        / "media-manifest.v1.schema.json"
-    )
-    assert json.loads(schema_path.read_text(encoding="utf-8")) == manifest.json_schema()
+    assert _contract("media-manifest.v2") == manifest.json_schema()
+
+
+def test_the_v1_contract_is_frozen_history():
+    """v1 manifests on disk are never rewritten, so neither is their contract.
+
+    The exported v2 file describes a model that still *reads* v1, so it is not
+    a replacement for this file - a consumer holding an old manifest validates
+    it against the shape that was current when it was written.
+    """
+    v1 = _contract("media-manifest.v1")
+    assert v1["properties"]["schema_version"]["const"] == manifest.LEGACY_SCHEMA_VERSION
+    roles = v1["$defs"]["MediaAsset"]["properties"]["role"]["enum"]
+    assert "branded_landscape_chunk" not in roles

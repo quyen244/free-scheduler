@@ -23,6 +23,7 @@ def _render_in_parallel(
     on_progress: Progress | None,
     video_id: str,
     render_revision: int,
+    schema_version: str | None = None,
 ) -> tuple[list[manifest.MediaAsset], list[manifest.ManifestFailure]]:
     """Encode independent delivery assets side by side, in a fixed order.
 
@@ -54,7 +55,8 @@ def _render_in_parallel(
             asset = build()
         except Exception as exc:  # one bad asset must not discard successful peers
             failure = _failure(
-                video_id, render_revision, role, content_item_id, brand_id, exc
+                video_id, render_revision, role, content_item_id, brand_id, exc,
+                schema_version,
             )
             with lock:
                 failures.append((index, failure))
@@ -87,11 +89,12 @@ def _failure(
     content_item_id: str,
     brand_id: str | None,
     exc: Exception,
+    schema_version: str | None = None,
 ) -> manifest.ManifestFailure:
     retryable = isinstance(exc, (RenderError, manifest.ManifestValidationError, OSError))
     return manifest.ManifestFailure(
         asset_id=manifest.deterministic_asset_id(
-            video_id, render_revision, role, content_item_id, brand_id
+            video_id, render_revision, role, content_item_id, brand_id, schema_version
         ),
         code=f"{role}_failed",
         message=f"{type(exc).__name__}: {exc}",
@@ -109,6 +112,7 @@ def _reuse_or_render(
     brand_id: str | None = None,
     lineage_asset_id: str | None = None,
     build: Callable[[], manifest.MediaAsset],
+    schema_version: str | None = None,
 ) -> manifest.MediaAsset:
     """Reuse a verified output after restart; rerender an invalid partial result."""
     path = manifest.expected_asset_path(
@@ -124,6 +128,7 @@ def _reuse_or_render(
                 expected_duration_s,
                 brand_id=brand_id,
                 lineage_asset_id=lineage_asset_id,
+                schema_version=schema_version,
             )
         except manifest.ManifestValidationError:
             # Until a ready manifest is committed, a corrupt output from an
@@ -353,13 +358,7 @@ def render_brand_revision(
     metadata_revision_id: str | None = None,
     on_progress: Progress | None = None,
 ) -> manifest.MediaManifest:
-    """Render or resume one revision from published `brand.v1` layouts.
-
-    The loop the brand-owned topology asks for: for every brand, take that
-    brand's own published layout and its own files and render the whole 16:9
-    asset plus every 9:16 chunk straight from the source. Nothing is shared
-    between brands, so a brand that fails leaves the others intact.
-    """
+    """Render a v2 landscape whole, then cut every delivery chunk from it."""
     brand_ids = sorted(brand_revisions)
     if not brand_ids:
         raise RenderError("brand_revisions must name at least one brand")
@@ -378,7 +377,8 @@ def render_brand_revision(
             revision_path.read_text(encoding="utf-8")
         )
         if (
-            existing.topology != "brand_owned"
+            existing.schema_version != manifest.SCHEMA_VERSION
+            or existing.topology != "landscape_chunks"
             or existing.chunk_names != chunk_names
             or existing.brand_revisions != brand_revisions
             or existing.metadata_revision_id != metadata_revision_id
@@ -394,13 +394,10 @@ def render_brand_revision(
     # missing file or carrying no visible footage layer is a configuration
     # mistake, and it should surface now rather than after the first brand has
     # already cost minutes of GPU time.
-    configs: dict[str, dict[str, dict]] = {}
+    configs: dict[str, dict] = {}
     for brand_id, brand_revision in sorted(brand_revisions.items()):
         published = brand_layouts.load_published(brand_id, brand_revision)
-        configs[brand_id] = {
-            aspect: brand_layouts.render_config(published, aspect)
-            for aspect in ("landscape", "vertical")
-        }
+        configs[brand_id] = brand_layouts.render_config(published, "landscape")
 
     transcript = library.load_transcript(video_id)
     segments = transcript.get("segments") or []
@@ -412,17 +409,12 @@ def render_brand_revision(
     fields = {"title": pipeline_db.title_for(video_id)}
     base_warnings = list(voice_manifest.get("warnings") or [])
 
-    # One flat list first, then encoded side by side. The nesting below is
-    # only an ordering - no asset needs any other asset - so building the list
-    # separately is what lets the encodes overlap without changing which
-    # assets a revision contains or the order the manifest lists them in.
-    builds: list[
+    whole_builds: list[
         tuple[manifest.AssetRole, str, str | None, Callable[[], manifest.MediaAsset]]
     ] = []
     for brand_id in brand_ids:
-        landscape = configs[brand_id]["landscape"]
-        vertical = configs[brand_id]["vertical"]
-        builds.append(
+        landscape = configs[brand_id]
+        whole_builds.append(
             (
                 "branded_whole",
                 manifest.WHOLE_ITEM,
@@ -442,56 +434,74 @@ def render_brand_revision(
                         segments,
                         fields=fields,
                         warnings=base_warnings,
+                        schema_version=manifest.SCHEMA_VERSION,
                     ),
+                    schema_version=manifest.SCHEMA_VERSION,
                 ),
             )
         )
+    wholes, failures = _render_in_parallel(
+        whole_builds, on_progress, video_id, render_revision, manifest.SCHEMA_VERSION
+    )
+    whole_by_brand = {asset.brand_id: asset for asset in wholes}
+
+    cut_builds: list[
+        tuple[manifest.AssetRole, str, str | None, Callable[[], manifest.MediaAsset]]
+    ] = []
+    for brand_id in brand_ids:
+        whole = whole_by_brand.get(brand_id)
         for chunk in chunks:
             name = str(chunk["name"])
             duration_s = float(chunk["end_s"]) - float(chunk["start_s"])
-            builds.append(
+            if whole is None:
+                failures.append(
+                    manifest.ManifestFailure(
+                        asset_id=manifest.deterministic_asset_id(
+                            video_id, render_revision, "branded_landscape_chunk", name,
+                            brand_id, manifest.SCHEMA_VERSION,
+                        ),
+                        code="whole_dependency_failed",
+                        message=(f"cannot cut {brand_id}/{name} until its branded whole succeeds"),
+                        retryable=True,
+                    )
+                )
+                if on_progress:
+                    on_progress(1.0)
+                continue
+            cut_builds.append(
                 (
-                    "branded_vertical",
+                    "branded_landscape_chunk",
                     name,
                     brand_id,
-                    lambda chunk=chunk, name=name, duration_s=duration_s,
-                    brand_id=brand_id, vertical=vertical: _reuse_or_render(
+                    lambda whole=whole, chunk=chunk, name=name, duration_s=duration_s:
+                    _reuse_or_render(
                         video_id=video_id,
                         render_revision=render_revision,
-                        role="branded_vertical",
+                        role="branded_landscape_chunk",
                         content_item_id=name,
                         expected_duration_s=duration_s,
-                        brand_id=brand_id,
-                        build=lambda: render.render_brand_variant(
-                            video_id,
-                            render_revision,
-                            vertical,
-                            brand_id,
-                            segments,
-                            chunk=chunk,
-                            fields=fields,
-                            texts={
-                                "caption_top": str(chunk.get("hook") or ""),
-                                "caption_bottom": str(chunk.get("caption") or ""),
-                            },
-                            warnings=base_warnings,
-                        ),
+                        brand_id=whole.brand_id,
+                        lineage_asset_id=whole.asset_id,
+                        schema_version=manifest.SCHEMA_VERSION,
+                        build=lambda: render.cut_branded_landscape_chunk(whole, chunk),
                     ),
                 )
             )
-
-    assets, failures = _render_in_parallel(
-        builds, on_progress, video_id, render_revision
+    cut_assets, cut_failures = _render_in_parallel(
+        cut_builds, on_progress, video_id, render_revision, manifest.SCHEMA_VERSION
     )
+    assets = [*wholes, *cut_assets]
+    failures.extend(cut_failures)
 
     state: manifest.ManifestState = "needs_action" if failures else "ready"
     result = manifest.MediaManifest(
+        schema_version=manifest.SCHEMA_VERSION,
         video_id=video_id,
         render_revision=render_revision,
         metadata_revision_id=metadata_revision_id,
         source_sha256=manifest.sha256_file(library.raw_path(video_id)),
         state=state,
-        topology="brand_owned",
+        topology="landscape_chunks",
         chunk_names=chunk_names,
         brand_ids=brand_ids,
         brand_revisions=brand_revisions,
@@ -511,71 +521,132 @@ def render_brand_preview(
     on_progress: Progress | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> tuple[list[manifest.MediaAsset], list[dict[str, str]], bool]:
-    """Render an operator preview without touching delivery paths or manifests."""
+    """Render an operator preview without touching delivery paths or manifests.
+
+    Same shape as delivery: the brand's landscape whole is rendered once and
+    every requested part is cut out of that file. A chunk is never rendered
+    from the source on its own, even when it is the only thing asked for,
+    because the music bed fades in at the start of the whole and loops from
+    there - a chunk rendered in isolation would carry a different bed than the
+    one that ships, which is exactly what a preview exists to rule out.
+
+    So `variants: "chunks"` still costs one whole render. The whole is written
+    into the preview directory as the cutting parent and simply not returned.
+    """
     chunks = library_chunks(video_id)
     by_number = {int(chunk["idx"]) + 1: chunk for chunk in chunks}
     transcript = library.load_transcript(video_id)
     segments = transcript.get("segments") or []
     voice_manifest = library.load_voice_manifest(video_id) or {}
-    source = render.probe(library.raw_path(video_id))
+    render.probe(library.raw_path(video_id))
     from shared import pipeline_db
 
     fields = {"title": pipeline_db.title_for(video_id)}
     warnings = list(voice_manifest.get("warnings") or [])
-    targets: list[tuple[str, str, dict[str, object] | None]] = []
-    for brand_id in sorted(brand_revisions):
-        selection = selections[brand_id]
-        variant = str(selection["variants"])
-        if variant in ("all", "landscape"):
-            targets.append((brand_id, "landscape", None))
-        if variant in ("all", "vertical"):
-            numbers = selection.get("chunks") or sorted(by_number)
-            for number in numbers:
-                chunk = by_number.get(int(number))
-                if chunk is None:
-                    raise RenderError(f"requested chunk {number} does not exist")
-                targets.append((brand_id, "vertical", chunk))
 
-    configs: dict[str, dict[str, dict]] = {}
-    for brand_id, revision in brand_revisions.items():
-        published = brand_layouts.load_published(brand_id, revision)
-        configs[brand_id] = {
-            aspect: brand_layouts.render_config(published, aspect)
-            for aspect in ("landscape", "vertical")
-        }
+    # Resolve the whole selection before any encoding starts: a chunk number
+    # nobody cut is the caller's mistake, and finding it after a full whole
+    # render has already been paid for helps nobody.
+    wanted: list[tuple[str, bool, list[dict[str, object]]]] = []
+    for brand_id in sorted(brand_revisions):
+        variant = str(selections[brand_id]["variants"])
+        if variant not in ("all", "whole", "chunks"):
+            raise RenderError(f"unknown preview variant {variant!r}")
+        numbers: list[int] = []
+        if variant in ("all", "chunks"):
+            numbers = [
+                int(number)
+                for number in (selections[brand_id].get("chunks") or sorted(by_number))
+            ]
+        for number in numbers:
+            if number not in by_number:
+                raise RenderError(f"requested chunk {number} does not exist")
+        wanted.append(
+            (brand_id, variant in ("all", "whole"), [by_number[n] for n in numbers])
+        )
+
+    configs = {
+        brand_id: brand_layouts.render_config(
+            brand_layouts.load_published(brand_id, revision), "landscape"
+        )
+        for brand_id, revision in brand_revisions.items()
+    }
 
     assets: list[manifest.MediaAsset] = []
     failures: list[dict[str, str]] = []
     root = library.video_dir(video_id) / "previews" / preview_id / "brands"
-    for position, (brand_id, aspect, chunk) in enumerate(targets):
+    # The parent counts as work whether or not it is delivered, so progress
+    # does not stall through a full render that reports nothing.
+    total = sum(1 + len(parts) for _brand, _whole, parts in wanted)
+    done = 0
+
+    def advance() -> None:
+        nonlocal done
+        done += 1
+        if on_progress:
+            on_progress(done / total)
+
+    for brand_id, want_whole, parts in wanted:
         if cancelled and cancelled():
             return assets, failures, True
-        content_item = manifest.WHOLE_ITEM if chunk is None else str(chunk["name"])
-        file_name = "whole-16x9.mp4" if chunk is None else f"{content_item}-9x16.mp4"
-        output = root / brand_id / ("vertical" if chunk is not None else "") / file_name
+        brand_root = root / brand_id
         try:
-            assets.append(
-                render.render_brand_variant(
-                    video_id,
-                    1,
-                    configs[brand_id][aspect],
-                    brand_id,
-                    segments,
-                    chunk=chunk,
-                    fields=fields,
-                    texts=(
-                        {"caption_top": str(chunk.get("hook") or ""), "caption_bottom": str(chunk.get("caption") or "")}
-                        if chunk is not None else None
-                    ),
-                    warnings=warnings,
-                    output_path=output,
-                    cancelled=cancelled,
-                )
+            whole = render.render_brand_variant(
+                video_id,
+                1,
+                configs[brand_id],
+                brand_id,
+                segments,
+                chunk=None,
+                fields=fields,
+                warnings=warnings,
+                output_path=brand_root / "whole-16x9.mp4",
+                cancelled=cancelled,
             )
         except Exception as exc:  # preserve successful preview peers
-            failures.append({"brand_id": brand_id, "content_item_id": content_item, "error": f"{type(exc).__name__}: {exc}"})
-        if on_progress:
-            on_progress((position + 1) / len(targets))
+            reason = f"{type(exc).__name__}: {exc}"
+            if want_whole:
+                failures.append(
+                    {"brand_id": brand_id, "content_item_id": manifest.WHOLE_ITEM,
+                     "error": reason}
+                )
+            for chunk in parts:
+                failures.append(
+                    {
+                        "brand_id": brand_id,
+                        "content_item_id": str(chunk["name"]),
+                        "error": f"whole parent failed: {reason}",
+                    }
+                )
+            advance()
+            for _ in parts:
+                advance()
+            continue
+
+        if want_whole:
+            assets.append(whole)
+        advance()
+
+        for chunk in parts:
+            if cancelled and cancelled():
+                return assets, failures, True
+            name = str(chunk["name"])
+            try:
+                assets.append(
+                    render.cut_branded_landscape_chunk(
+                        whole,
+                        chunk,
+                        output_path=brand_root / "landscape" / f"{name}-16x9.mp4",
+                        cancelled=cancelled,
+                    )
+                )
+            except Exception as exc:  # one bad cut must not discard its peers
+                failures.append(
+                    {"brand_id": brand_id, "content_item_id": name,
+                     "error": f"{type(exc).__name__}: {exc}"}
+                )
+            advance()
+
     return assets, failures, False
 
 

@@ -1,0 +1,4 @@
+query metadata :
+
+docker compose -f automation/docker-compose.yml run --rm --no-deps metadata-service `
+  python query_metadata.py --id hS3VXBeEv0I

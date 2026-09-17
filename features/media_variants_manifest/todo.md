@@ -42,3 +42,52 @@
 - [x] Visually inspect representative frames for both layouts. Evidence:
   `reports/step2-revision3-branded-whole-frame.jpg` and
   `reports/step2-revision3-branded-part1-frame.jpg`.
+
+## Landscape chunk delivery — `media-manifest.v2` (2026-09-17)
+
+Implements `landscape_chunk_delivery_proposal.md`. Every delivery asset is
+1920x1080; a chunk is a frame-accurate cut of its own brand's whole.
+
+- [x] Define v2 roles, paths, lineage validation, and v1 read compatibility.
+  Evidence: `manifest.py` `branded_landscape_chunk` role, `SCHEMA_VERSION`
+  carried into `deterministic_asset_id`, `contracts/media-manifest.v2.schema.json`
+  generated in the container; `tests/test_landscape_chunks.py` and
+  `tests/test_manifest.py::test_the_v1_contract_is_frozen_history`.
+- [x] Fix `_validate_ready_topology`, which added v1 `branded_vertical`
+  expectations on top of the v2 set, so no v2 revision could ever reach
+  `ready`. Evidence: `TestTopology` in `tests/test_landscape_chunks.py`; the
+  real revision below reaches `ready`.
+- [x] Replace vertical delivery targets with one landscape whole plus
+  frame-accurate cuts, keeping retry/resume. Evidence:
+  `variants.render_brand_revision`, `render.cut_branded_landscape_chunk`
+  (`-ss` after `-i`, re-encode, never `-c copy`).
+- [x] Cut preview chunks from the preview whole instead of from source, so a
+  preview carries the shipping music bed. Evidence:
+  `variants.render_brand_preview`; `tests/test_preview_jobs.py`
+  `test_a_chunks_only_preview_still_cuts_from_a_real_whole`,
+  `test_a_failed_whole_fails_every_chunk_that_depended_on_it`.
+- [x] Update the acceptance contract validator and fixtures. Evidence:
+  `automation/acceptance-contract/contract.py` snapshots are `step1.v2` with
+  `assets.chunks` at 1920x1080 and a required `lineage_asset_id`;
+  `python -m unittest discover -s automation/acceptance-contract`, `16 passed`.
+- [x] Run a real representative render with probe, checksum and frame evidence.
+  Evidence: `hS3VXBeEv0I`, brand `an-so` revision 13, throwaway render
+  revision 9002 — `media-manifest.v2` / `landscape_chunks` / `state=ready`,
+  4 assets, 0 failures, 554.2 s wall for 1375 s of media (2.48x realtime).
+  Every asset re-probed from disk: 1920x1080 h264/aac, 24000/1001 fps, audio
+  and video stream durations within 0.04 s, sizes and recomputed SHA-256
+  matching the manifest, each chunk's duration within 0.05 s of its persisted
+  `chunks` span, each chunk's `lineage_asset_id` naming the brand's whole.
+- [x] Prove the cut lands on the boundary frame rather than near it. Evidence:
+  each chunk's frame 0 scored by SSIM against a +/-3-frame fan of the whole
+  around `start_s`; the peak sits on the boundary for all three parts
+  (part_1 0.9974, part_2 0.9883, part_3 0.9807, each above its neighbours).
+- [x] Visually inspect representative 16:9 frames. Evidence:
+  `reports/landscape-chunks-whole-t200-frame.jpg` and
+  `reports/landscape-chunks-part2-first-frame.jpg` — the chunk's first frame
+  carries the same background, host, watermarks and subtitle treatment as the
+  whole. The title layer is absent because `RENDER_FROZEN_TEXT=title`.
+- [ ] Record a Facebook Page-video and TikTok inbox-draft preflight against a
+  real 1920x1080 chunk. Still unverified: the landscape rules in
+  `features/_shared/delivery_contract.md` are read from platform
+  documentation, not from a provider response. No publisher adapter exists yet.

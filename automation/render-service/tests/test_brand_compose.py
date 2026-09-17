@@ -6,6 +6,8 @@ the order the editor showed them, and that a layout which placed no subtitle
 does not get one anyway. Strings only — no encode, so this stays fast.
 """
 
+import dataclasses
+
 import pytest
 
 import preset as presets
@@ -240,3 +242,92 @@ def test_a_blur_that_lands_off_the_canvas_is_reported_rather_than_drawn(tmp_path
 
     assert "crop=" not in graph
     assert any("plate" in warning and "outside the canvas" in warning for warning in warnings)
+
+
+# ---------------------------------------------------------------------------
+# frozen text layers
+# ---------------------------------------------------------------------------
+
+
+def _text(layer_id, source, **overrides):
+    layer = {
+        "id": layer_id,
+        "source": source,
+        "text": "Tiêu đề mẫu",
+        "x": 0.1, "y": 0.05, "w": 0.6,
+        "size": 52, "color": "yellow", "align": "left", "z": 40,
+    }
+    layer.update(overrides)
+    return layer
+
+
+def _compose_with_fields(config, directory, fields):
+    geometry = presets.resolve(config, SOURCE.width, SOURCE.height)
+    return render.compose_clean(
+        config, geometry, SOURCE, directory, "check", "check.ass", 4.0, fields=fields
+    )
+
+
+def _freeze(monkeypatch, *names):
+    """`Settings` is a frozen dataclass, so swap the whole object."""
+    monkeypatch.setattr(
+        render,
+        "settings",
+        dataclasses.replace(render.settings, frozen_text=frozenset(names)),
+    )
+
+
+class TestFrozenText:
+    """`RENDER_FROZEN_TEXT` decides what is drawn, not what a brand stores.
+
+    The point of the switch is that a layout keeps its title layer: freezing is
+    reversible without touching a brand, and unfreezing must not need one
+    either. So these check the filtergraph, never the config.
+    """
+
+    def test_a_frozen_binding_draws_nothing(self, tmp_path, monkeypatch):
+        _freeze(monkeypatch, "title")
+        config = _config(text_layers=[_text("title", "title")])
+        graph, _, _ = _compose(config, tmp_path)
+        assert "drawtext" not in graph
+
+    def test_freezing_says_so_on_the_asset(self, tmp_path, monkeypatch):
+        # A missing title has to be explicable from the manifest alone, or the
+        # next operator reads it as a render fault.
+        _freeze(monkeypatch, "title")
+        config = _config(text_layers=[_text("title", "title")])
+        _, _, warnings = _compose(config, tmp_path)
+        assert any("RENDER_FROZEN_TEXT" in warning for warning in warnings)
+
+    def test_a_static_layer_is_frozen_by_its_id(self, tmp_path, monkeypatch):
+        # Its binding is "static", so only the id can identify it.
+        _freeze(monkeypatch, "title")
+        config = _config(text_layers=[_text("title", "static")])
+        graph, _, _ = _compose(config, tmp_path)
+        assert "drawtext" not in graph
+
+    def test_other_text_layers_are_untouched(self, tmp_path, monkeypatch):
+        _freeze(monkeypatch, "title")
+        config = _config(
+            text_layers=[_text("title", "title"), _text("part", "static", text="Phần 1")]
+        )
+        graph, _, _ = _compose(config, tmp_path)
+        assert graph.count("drawtext") == 1
+
+    def test_freezing_nothing_draws_the_title(self, tmp_path, monkeypatch):
+        # The same layer and the same field as the frozen case above, so the
+        # only thing that changed is the switch.
+        _freeze(monkeypatch)
+        config = _config(text_layers=[_text("title", "title")])
+        graph, _, _ = _compose_with_fields(config, tmp_path, {"title": "Có tiêu đề"})
+        assert "drawtext" in graph
+
+
+def test_a_frozen_bound_layer_is_skipped_even_with_a_value(tmp_path, monkeypatch):
+    # The freeze is the renderer's decision, not a consequence of the field
+    # being empty - the two skips have different reasons and different logs.
+    _freeze(monkeypatch, "title")
+    config = _config(text_layers=[_text("title", "title")])
+    graph, _, warnings = _compose_with_fields(config, tmp_path, {"title": "Có tiêu đề"})
+    assert "drawtext" not in graph
+    assert any("RENDER_FROZEN_TEXT" in warning for warning in warnings)

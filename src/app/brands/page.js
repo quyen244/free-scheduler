@@ -74,6 +74,76 @@ const rectOf = (layer) => ({
   h: Number(layer.h ?? 1),
 });
 
+/** Source shapes the footage can have; the preview needs one to fit against. */
+const SOURCE_ASPECTS = [
+  ["1.7778", "16:9 — nguồn YouTube"],
+  ["1.3333", "4:3"],
+  ["1", "1:1"],
+  ["0.8", "4:5"],
+  ["0.5625", "9:16"],
+];
+
+/** `/api/brands/assets` URL for one of a brand's files. */
+const assetSrc = (brandId, file) =>
+  `/api/brands/assets?brandId=${encodeURIComponent(brandId)}&file=${encodeURIComponent(file)}`;
+
+/**
+ * Where the footage really lands inside the rectangle drawn for it.
+ *
+ * `preset.resolve()` fits the whole source *inside* `video_rect` instead of
+ * stretching it to fill, so that rectangle is a **slot** and the picture is a
+ * centred box within it. Drawing the slot as though it were the picture is
+ * what made a 16:9 source look mis-placed in the 2.38:1 landscape slot: the
+ * render put 202 px of background down each side that the editor never showed.
+ *
+ * Same maths as `resolve`, in canvas fractions rather than pixels, with the
+ * source taken as `aspect` wide and 1 high - only its ratio matters here.
+ */
+function fitInside(slot, canvas, aspect) {
+  const slotW = canvas.w * slot.w;
+  const slotH = canvas.h * slot.h;
+  if (!(slotW > 0 && slotH > 0 && aspect > 0)) return slot;
+  const scale = Math.min(slotW / aspect, slotH);
+  const width = aspect * scale;
+  return {
+    x: slot.x + (slotW - width) / 2 / canvas.w,
+    y: slot.y + (slotH - scale) / 2 / canvas.h,
+    w: width / canvas.w,
+    h: scale / canvas.h,
+  };
+}
+
+/**
+ * The main video's slot, forced to the source's own aspect ratio.
+ *
+ * `fitInside` shows the gap between the slot and the picture; this closes it.
+ * A slot at the source's ratio makes `min()` in `preset.resolve()` pick the
+ * same scale on both axes, so the picture fills the slot exactly and the two
+ * rectangles become one. That is what makes "what you drag is what renders"
+ * literally true — and what stops a logo pinned to a slot corner from landing
+ * in empty background, which is how the 2.38:1 landscape slot went wrong.
+ *
+ * `driveWidth` says which edge the pointer is leading with; the other follows.
+ * The result is clamped back inside the canvas *along the ratio*, never by
+ * squashing one axis, because squashing is the thing this exists to prevent.
+ */
+function lockToAspect(rect, canvas, aspect, driveWidth = true) {
+  if (!(aspect > 0)) return rect;
+  const widthFromHeight = (h) => (h * canvas.h * aspect) / canvas.w;
+  const heightFromWidth = (w) => (w * canvas.w) / aspect / canvas.h;
+
+  let w = driveWidth ? rect.w : widthFromHeight(rect.h);
+  w = Math.max(w, 0.02);
+  let h = heightFromWidth(w);
+  // Shrink along the diagonal until both edges are back on the canvas.
+  const room = Math.min(1, (1 - rect.x) / w, (1 - rect.y) / h);
+  if (room < 1) {
+    w *= room;
+    h *= room;
+  }
+  return { ...rect, w: round3(w), h: round3(h) };
+}
+
 /**
  * How far a layer's origin may travel along one axis.
  *
@@ -138,6 +208,14 @@ export default function BrandEditorPage() {
   const [brandId, setBrandId] = useState("");
   const [brand, setBrand] = useState(null);
   const [aspect, setAspect] = useState("vertical");
+  // A preview aid, not brand data: the renderer learns the source's shape from
+  // the file itself, so persisting a guess here would only add a field that
+  // can disagree with the footage.
+  const [sourceAspect, setSourceAspect] = useState("1.7778");
+  // Measured from the mock frame when there is one. Lifted out of `Stage`
+  // because the properties panel now needs the same number to keep the main
+  // video's width and height locked together.
+  const [measured, setMeasured] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState("");
@@ -152,6 +230,26 @@ export default function BrandEditorPage() {
     () => Object.fromEntries(assets.map((asset) => [asset.id, asset])),
     [assets],
   );
+
+  const mockAsset = brand?.mock_main_asset ? assetById[brand.mock_main_asset] : null;
+  // A mock frame is a stand-in for the footage, so its own shape beats the
+  // dropdown: locking the slot to a ratio the picture does not have would
+  // reintroduce the very gap the lock exists to close.
+  useEffect(() => {
+    if (!mockAsset || !brand) return undefined;
+    const image = new window.Image();
+    image.onload = () =>
+      setMeasured({ file: mockAsset.file, aspect: image.naturalWidth / image.naturalHeight });
+    image.src = assetSrc(brand.brand_id, mockAsset.file);
+    return () => {
+      image.onload = null;
+    };
+  }, [brand, mockAsset]);
+
+  // Kept against the file it was measured from, so switching brands falls back
+  // to the dropdown instead of fitting one brand's footage to another's shape.
+  const mockRatio = mockAsset && measured?.file === mockAsset.file ? measured.aspect : null;
+  const sourceRatio = mockRatio || Number(sourceAspect) || 0;
 
   const call = useCallback(async (url, init) => {
     const response = await fetch(url, init);
@@ -398,6 +496,13 @@ export default function BrandEditorPage() {
     });
   };
 
+  const patchMusic = (patch) => {
+    setBrand((current) => {
+      if (!current?.signature_music) return current;
+      return { ...current, signature_music: { ...current.signature_music, ...patch } };
+    });
+  };
+
   // -------------------------------------------------------------------------
   // server actions
   // -------------------------------------------------------------------------
@@ -637,11 +742,17 @@ export default function BrandEditorPage() {
             onAddBlur={addBlur}
             onAddText={addText}
             onAddSubtitle={addSubtitle}
+            onPatchMusic={patchMusic}
           />
 
           <Stage
             brand={brand}
             canvas={canvas}
+            sourceAspect={sourceAspect}
+            onSourceAspect={setSourceAspect}
+            sourceRatio={sourceRatio}
+            mockRatio={mockRatio}
+            mockAsset={mockAsset}
             layers={layers}
             assetById={assetById}
             selectedId={selectedId}
@@ -663,6 +774,7 @@ export default function BrandEditorPage() {
               layer={selected}
               assets={assets}
               canvas={canvas}
+              sourceRatio={sourceRatio}
               onPatch={(patch) => selected && patchLayer(selected.id, patch)}
             />
           </div>
@@ -686,6 +798,7 @@ function AssetPanel({
   onAddBlur,
   onAddText,
   onAddSubtitle,
+  onPatchMusic,
 }) {
   const [role, setRole] = useState("background");
   // Empty means "whatever the brand has room for". Derived rather than stored,
@@ -795,9 +908,7 @@ function AssetPanel({
           ))}
         </ul>
         {brand.signature_music && (
-          <p className="mt-2 text-xs text-secondary-text">
-            Nhạc hiệu: {brand.signature_music.file}
-          </p>
+          <MusicSettings music={brand.signature_music} onPatch={onPatchMusic} />
         )}
       </section>
 
@@ -811,6 +922,65 @@ function AssetPanel({
         </div>
       </section>
     </aside>
+  );
+}
+
+function MusicSettings({ music, onPatch }) {
+  const peak = music.peak_control;
+  const setPeak = (patch) => onPatch({ peak_control: { ...peak, ...patch } });
+  const togglePeak = (enabled) =>
+    onPatch({
+      peak_control: enabled
+        ? { enabled: true, target_rms: 0.029, window_ms: 400, attack_ms: 20, release_ms: 350 }
+        : null,
+    });
+
+  return (
+    <section className="mt-3 rounded border border-divider bg-bg-elevated p-2 text-xs">
+      <div className="font-medium text-primary-text">Nhạc hiệu</div>
+      <div className="truncate text-secondary-text">{music.file}</div>
+      <label className="mt-2 flex cursor-pointer items-center gap-2 text-secondary-text">
+        <input
+          type="checkbox"
+          checked={Boolean(peak)}
+          onChange={(event) => togglePeak(event.target.checked)}
+        />
+        Hạ nhạc ở đoạn cao trào của chính bài nhạc
+      </label>
+      {peak && (
+        <>
+          <p className="mt-1 text-[11px] text-secondary-text">
+            Không dùng giọng đọc. Trần RMS 0.029 đã cân cho nhạc này để đoạn cao trào về khoảng 30%.
+          </p>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <Field
+              label="Trần RMS"
+              value={peak.target_rms}
+              step={0.001}
+              min={0.001}
+              max={1}
+              onChange={(target_rms) => setPeak({ target_rms })}
+            />
+            <Field
+              label="Vào (ms)"
+              value={peak.attack_ms}
+              step={0.1}
+              min={0.1}
+              max={80}
+              onChange={(attack_ms) => setPeak({ attack_ms })}
+            />
+            <Field
+              label="Nhả (ms)"
+              value={peak.release_ms}
+              step={1}
+              min={1}
+              max={8000}
+              onChange={(release_ms) => setPeak({ release_ms })}
+            />
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -830,7 +1000,20 @@ function PanelButton({ icon: Icon, label, onClick }) {
 // centre: the canvas
 // ---------------------------------------------------------------------------
 
-function Stage({ brand, canvas, layers, assetById, selectedId, onSelect, onPatch }) {
+function Stage({
+  brand,
+  canvas,
+  sourceAspect,
+  onSourceAspect,
+  sourceRatio,
+  mockRatio,
+  mockAsset,
+  layers,
+  assetById,
+  selectedId,
+  onSelect,
+  onPatch,
+}) {
   const frame = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -849,8 +1032,20 @@ function Stage({ brand, canvas, layers, assetById, selectedId, onSelect, onPatch
   // Capping both ratios at one width would leave the 16:9 canvas a strip too
   // short to drag a layer inside, so cap them at the same height instead.
   const stageMaxWidth = (canvas.w / canvas.h) * 750;
-  const mockAsset = brand.mock_main_asset ? assetById[brand.mock_main_asset] : null;
   const video = layers.find((layer) => layer.kind === "main_video");
+
+  const slot = video ? rectOf(video) : { x: 0, y: 0, w: 1, h: 1 };
+  // What `preset.resolve()` will produce, and therefore what a blur - which is
+  // normalised against the source frame - has to be mapped through. With the
+  // slot locked to the source ratio the two are the same rectangle; it stays
+  // here because a layout saved before the lock can still disagree.
+  const footage = video ? fitInside(slot, canvas, sourceRatio) : slot;
+  // Two pixels of slack, not zero: layer numbers are stored to three decimals
+  // and the renderer rounds to even pixels, so an exactly-locked slot can
+  // still land a pixel out. Warning on that would be crying wolf.
+  const slotMatchesFootage =
+    Math.abs(canvas.w * (slot.w - footage.w)) <= 2 &&
+    Math.abs(canvas.h * (slot.h - footage.h)) <= 2;
 
   const drag = (layer, mode) => (event) => {
     event.preventDefault();
@@ -862,7 +1057,7 @@ function Stage({ brand, canvas, layers, assetById, selectedId, onSelect, onPatch
     const start = rectOf(layer);
     // The blur is normalised against the source frame, which the preview draws
     // inside the footage rectangle, so its pointer maths uses that rectangle.
-    const host = layer.kind === "blur" && video ? rectOf(video) : { x: 0, y: 0, w: 1, h: 1 };
+    const host = layer.kind === "blur" && video ? footage : { x: 0, y: 0, w: 1, h: 1 };
     const spanX = box.width * host.w;
     const spanY = box.height * host.h;
 
@@ -881,6 +1076,18 @@ function Stage({ brand, canvas, layers, assetById, selectedId, onSelect, onPatch
         });
       } else if (layer.kind === "text") {
         onPatch(layer.id, { w: round3(Math.min(Math.max(start.w + dx, 0.05), 1 - start.x)) });
+      } else if (layer.kind === "main_video" && sourceRatio > 0) {
+        // Both edges move together, led by whichever the pointer travelled
+        // further in on the canvas. A free resize here is what let the slot
+        // drift away from the source's ratio in the first place.
+        const driveWidth = Math.abs(dx * canvas.w) >= Math.abs(dy * canvas.h);
+        const locked = lockToAspect(
+          { ...start, w: Math.max(start.w + dx, 0.02), h: Math.max(start.h + dy, 0.02) },
+          canvas,
+          sourceRatio,
+          driveWidth,
+        );
+        onPatch(layer.id, { w: locked.w, h: locked.h });
       } else {
         onPatch(layer.id, {
           w: round3(Math.min(Math.max(start.w + dx, 0.02), 1 - start.x)),
@@ -914,7 +1121,7 @@ function Stage({ brand, canvas, layers, assetById, selectedId, onSelect, onPatch
               layer={layer}
               canvas={canvas}
               scale={scale}
-              host={video ? rectOf(video) : { x: 0, y: 0, w: 1, h: 1 }}
+              host={video ? footage : { x: 0, y: 0, w: 1, h: 1 }}
               selected={layer.id === selectedId}
               onDrag={drag}
             />
@@ -927,15 +1134,69 @@ function Stage({ brand, canvas, layers, assetById, selectedId, onSelect, onPatch
               brandId={brand.brand_id}
               asset={layer.asset ? assetById[layer.asset] : null}
               mockAsset={mockAsset}
+              footage={layer.kind === "main_video" ? footage : null}
               selected={layer.id === selectedId}
               onDrag={drag}
             />
           ),
         )}
       </div>
-      <p className="text-xs text-secondary-text">
-        {canvas.w}×{canvas.h} · kéo để di chuyển, kéo góc dưới phải để đổi kích thước
-      </p>
+      <div className="flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-secondary-text">
+        <span>
+          {canvas.w}×{canvas.h} · kéo để di chuyển, kéo góc dưới phải để đổi kích thước
+        </span>
+        <label className="flex items-center gap-1">
+          Tỉ lệ nguồn
+          <select
+            value={mockRatio ? "" : sourceAspect}
+            disabled={!!mockRatio}
+            onChange={(event) => onSourceAspect(event.target.value)}
+            className="rounded border border-divider bg-bg-card px-1 py-0.5 text-xs disabled:opacity-60"
+          >
+            {mockRatio && <option value="">theo ảnh giả lập</option>}
+            {SOURCE_ASPECTS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {video && (
+          <span className="text-[11px]">
+            vùng video thật ≈ {Math.round(canvas.w * footage.x)},{" "}
+            {Math.round(canvas.h * footage.y)} px · {Math.round(canvas.w * footage.w)}×
+            {Math.round(canvas.h * footage.h)} px
+          </span>
+        )}
+      </div>
+      {/* Only a layout saved before the lock can land here: new drags keep the
+          slot on the source's ratio, so there is nothing left to warn about. */}
+      {video && !slotMatchesFootage && (
+        <div className="flex w-full flex-wrap items-center justify-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-200">
+          <span>
+            Khung video lệch tỉ lệ nguồn: renderer sẽ chừa{" "}
+            <strong>
+              {Math.round((canvas.w * (slot.w - footage.w)) / 2)}px hai bên,{" "}
+              {Math.round((canvas.h * (slot.h - footage.h)) / 2)}px trên dưới
+            </strong>{" "}
+            — mọi lớp bám vào góc khung sẽ rơi ra ngoài hình.
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              onPatch(video.id, {
+                x: round3(footage.x),
+                y: round3(footage.y),
+                w: round3(footage.w),
+                h: round3(footage.h),
+              })
+            }
+            className="rounded border border-amber-400/60 px-2 py-0.5 font-medium hover:bg-amber-500/20"
+          >
+            Khớp tỉ lệ nguồn
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -976,10 +1237,19 @@ function BlurBox({ layer, canvas, scale, host, selected, onDrag }) {
   );
 }
 
-function LayerBox({ layer, canvas, scale, brandId, asset, mockAsset, selected, onDrag }) {
+function LayerBox({
+  layer,
+  canvas,
+  scale,
+  brandId,
+  asset,
+  mockAsset,
+  footage,
+  selected,
+  onDrag,
+}) {
   const rect = rectOf(layer);
-  const src = (file) =>
-    `/api/brands/assets?brandId=${encodeURIComponent(brandId)}&file=${encodeURIComponent(file)}`;
+  const src = (file) => assetSrc(brandId, file);
 
   // A subtitle has no rectangle of its own: it is a baseline and a margin, so
   // the preview draws the band the renderer will draw into.
@@ -1076,28 +1346,49 @@ function LayerBox({ layer, canvas, scale, brandId, asset, mockAsset, selected, o
       />
     );
   } else if (layer.kind === "main_video") {
-    inner = mockAsset ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={src(mockAsset.file)}
-        alt="giả lập video chính"
-        draggable={false}
-        className="h-full w-full"
-        style={{ objectFit: layer.fit === "fill" ? "fill" : "contain" }}
-      />
-    ) : (
-      <div className="flex h-full w-full items-center justify-center bg-zinc-700/70 text-xs text-zinc-300">
-        VIDEO CHÍNH
+    // The slot stays as the thing you drag; the picture is drawn where the
+    // renderer will actually put it, which is a centred fit inside that slot.
+    // `objectFit` is deliberately not used any more: it hid the difference
+    // between the two rectangles instead of showing it.
+    const inset = footage
+      ? {
+          left: `${((footage.x - rect.x) / rect.w) * 100}%`,
+          top: `${((footage.y - rect.y) / rect.h) * 100}%`,
+          width: `${(footage.w / rect.w) * 100}%`,
+          height: `${(footage.h / rect.h) * 100}%`,
+        }
+      : { left: 0, top: 0, width: "100%", height: "100%" };
+    inner = (
+      <div className="absolute" style={inset}>
+        {mockAsset ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src(mockAsset.file)}
+            alt="giả lập video chính"
+            draggable={false}
+            className="h-full w-full"
+            style={{ objectFit: "fill" }}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-zinc-700/70 text-xs text-zinc-300">
+            VIDEO CHÍNH
+          </div>
+        )}
       </div>
     );
   }
 
+  const outline =
+    layer.kind === "main_video"
+      ? `border-2 border-dashed ${selected ? "border-primary" : "border-white/30"}`
+      : selected
+        ? "outline outline-2 outline-primary"
+        : "outline outline-1 outline-white/15";
+
   return (
     <div
       onPointerDown={onDrag(layer, "move")}
-      className={`absolute cursor-move ${
-        selected ? "outline outline-2 outline-primary" : "outline outline-1 outline-white/15"
-      }`}
+      className={`absolute cursor-move ${outline}`}
       style={frameStyle}
     >
       {inner}
@@ -1258,7 +1549,7 @@ function Choice({ label, value, options, onChange }) {
   );
 }
 
-function Properties({ layer, assets, canvas, onPatch }) {
+function Properties({ layer, assets, canvas, sourceRatio, onPatch }) {
   if (!layer) {
     return (
       <section className="rounded-lg border border-divider bg-bg-card p-3">
@@ -1272,6 +1563,16 @@ function Properties({ layer, assets, canvas, onPatch }) {
   const pixels = (value, axis) =>
     Math.round((axis === "x" ? canvas.w : canvas.h) * Number(value || 0));
 
+  // Typing a number must obey the same lock as dragging a corner, or the panel
+  // becomes the back door that puts the slot off-ratio again.
+  const locked = layer.kind === "main_video" && sourceRatio > 0;
+  const setSize = (field) => (value) => {
+    const next = { ...rect, [field]: clamp01(value) };
+    if (!locked) return onPatch({ [field]: next[field] });
+    const fitted = lockToAspect(next, canvas, sourceRatio, field === "w");
+    return onPatch({ w: fitted.w, h: fitted.h });
+  };
+
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-divider bg-bg-card p-3">
       <h2 className="text-sm font-semibold">
@@ -1283,17 +1584,9 @@ function Properties({ layer, assets, canvas, onPatch }) {
           <div className="grid grid-cols-2 gap-2">
             <Field label="X" value={rect.x} onChange={(value) => onPatch({ x: clamp01(value) })} />
             <Field label="Y" value={rect.y} onChange={(value) => onPatch({ y: clamp01(value) })} />
-            <Field
-              label="Rộng"
-              value={rect.w}
-              onChange={(value) => onPatch({ w: clamp01(value) })}
-            />
+            <Field label="Rộng" value={rect.w} onChange={setSize("w")} />
             {layer.kind !== "text" && (
-              <Field
-                label="Cao"
-                value={rect.h}
-                onChange={(value) => onPatch({ h: clamp01(value) })}
-              />
+              <Field label="Cao" value={rect.h} onChange={setSize("h")} />
             )}
           </div>
           <p className="text-[11px] text-secondary-text">
@@ -1334,15 +1627,23 @@ function Properties({ layer, assets, canvas, onPatch }) {
       )}
 
       {layer.kind === "main_video" && (
-        <Choice
-          label="Cách vừa khung"
-          value={layer.fit || "contain"}
-          options={[
-            ["contain", "Giữ tỉ lệ (contain)"],
-            ["fill", "Kéo đầy khung (fill)"],
-          ]}
-          onChange={(value) => onPatch({ fit: value })}
-        />
+        <p className="text-[11px] text-secondary-text">
+          {locked ? (
+            <>
+              Rộng và cao <strong>khoá theo tỉ lệ nguồn</strong>: đổi một cạnh
+              thì cạnh kia đổi theo. Renderer thu video vừa trong khung và giữ
+              tỉ lệ gốc (<code>preset.resolve</code>), nên khung đúng tỉ lệ
+              nguồn là khung <strong>trùng khít</strong> video — kéo ở đây thấy
+              sao thì render ra vậy.
+            </>
+          ) : (
+            <>
+              Chưa biết tỉ lệ nguồn nên khung này chỉ là <strong>vùng đặt</strong>,
+              không phải kích thước video. Chọn “Tỉ lệ nguồn” dưới khung xem để
+              khoá lại.
+            </>
+          )}
+        </p>
       )}
 
       {layer.kind === "text" && (

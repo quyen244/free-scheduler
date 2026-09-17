@@ -39,12 +39,22 @@ flowchart LR
     BC --> T[Brand TikTok account]
 ```
 
-Signature music is mixed as a quiet background bed. The calibrated mock profile
-uses `-24 dB` base gain and speech-aware compression with threshold `0.02`,
-ratio `8:1`, `20 ms` attack, and `450 ms` release. Music loops for the complete
-asset, fades in for `0.75 s`, and fades out for `1.0 s`. A frequency-isolated
-fixture verifies that the music falls during narration, remains present after
-the source music duration, and fades at both asset boundaries.
+Signature music is mixed as a quiet background bed. Its gain is calibrated per
+brand against the narrator rather than copied across music tracks. For `an-so`,
+the confirmed mix is `volume_db: -7.9`, yielding 44 % of narration while speech
+is present and 45 % in pauses. `ratio: 1.0` deliberately disables ducking, so
+the bed stays flat; the compressor remains in the graph because the schema
+requires that shape. Music loops for the complete asset, fades in for `0.75 s`,
+and fades out for `1.0 s`. A frequency-isolated fixture verifies that the music
+remains present after the source music duration and fades at both asset
+boundaries.
+
+An optional music-only peak control can prevent a musical crescendo from
+overpowering the bed. It reads only the post-gain music track in fixed RMS
+windows and applies a smoothed gain envelope before the music/voice mix. The
+operator tried it for `an-so` but selected the flat 45 % bed instead, so its
+draft has no peak-control setting. When enabled for another brand, the setting
+is part of the immutable brand revision and never uses the voice as a trigger.
 
 ## State lifecycle
 

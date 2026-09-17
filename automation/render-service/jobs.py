@@ -116,7 +116,6 @@ def run_media_revision(
     video_id: str,
     render_revision: int,
     brand_ids: list[str],
-    vertical_preset: str,
     landscape_preset: str,
     metadata_revision_id: str | None,
     preset_id: str | None = None,
@@ -146,10 +145,8 @@ def run_media_revision(
                 video_id,
                 render_revision,
                 brand_ids=brand_ids,
-                vertical_preset_name=vertical_preset,
                 landscape_preset_name=landscape_preset,
                 metadata_revision_id=metadata_revision_id,
-                vertical_preset_override=(visual_preset.clean_render_preset(editor_preset, "vertical") if editor_preset else None),
                 landscape_preset_override=(visual_preset.clean_render_preset(editor_preset, "landscape") if editor_preset else None),
                 on_progress=lambda done: pipeline_db.set_progress(job_id, done),
             )

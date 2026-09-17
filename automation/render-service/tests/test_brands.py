@@ -218,6 +218,38 @@ def test_each_publish_is_a_new_immutable_revision_with_its_own_hash(brand_root):
     assert brands.latest_revision("an-so") == 2
 
 
+def test_music_peak_control_is_preserved_in_the_published_render_contract(brand_root):
+    _write_files(brand_root, "an-so", *ALL_FILES, "music.mp3")
+    draft = _draft(
+        signature_music={
+            "file": "music.mp3",
+            "volume_db": -7.9,
+            "loop": True,
+            "fade_in_s": 0.75,
+            "fade_out_s": 1.0,
+            "ducking": {
+                "enabled": True,
+                "threshold": 0.025,
+                "ratio": 1.0,
+                "attack_ms": 20.0,
+                "release_ms": 200.0,
+            },
+            "peak_control": {
+                "enabled": True,
+                "target_rms": 0.029,
+                "window_ms": 400,
+                "attack_ms": 20.0,
+                "release_ms": 350.0,
+            },
+        }
+    )
+
+    published = brands.publish(draft)
+    config = brands.render_config(published, "vertical")
+
+    assert config["signature_music"]["peak_control"] == draft["signature_music"]["peak_control"]
+
+
 def test_a_draft_is_not_a_render_input(brand_root):
     """Only a published revision may be rendered.
 

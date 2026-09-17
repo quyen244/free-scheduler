@@ -23,8 +23,12 @@ Last updated: 2026-09-17
 
 ## Content and metadata
 
-- YouTube receives the whole video as 16:9. Facebook and TikTok receive unique,
-  non-overlapping 9:16 chunks.
+- All delivery video is 16:9 (1920x1080). YouTube receives the complete
+  landscape video. Facebook and TikTok each receive unique, non-overlapping
+  landscape chunks cut from that rendered landscape video.
+- Chunk boundaries and count continue to use the existing balanced,
+  sentence-safe chunking algorithm; only the delivery aspect ratio and render
+  lineage change.
 - Chunk count is variable. Sources from 5-9 minutes produce one chunk. Longer
   sources produce balanced chunks targeting 4-5 minutes with no tiny
   remainder. When no chunk count can satisfy that range (currently sources
@@ -69,8 +73,8 @@ Last updated: 2026-09-17
 ## Brands, approval, and publishing
 
 - A brand profile groups its YouTube, Facebook, and TikTok accounts.
-- The brand profile owns the watermark and signature music used on both 16:9 and
-  9:16 outputs.
+- The brand profile owns the watermark and signature music used on all 16:9
+  delivery outputs (whole video and chunks).
 - Render reusable clean masters first, then derive separate branded variants.
   A brand's vertical variant may be reused by that brand's Facebook and TikTok
   accounts.
@@ -79,12 +83,12 @@ Last updated: 2026-09-17
   Vietnamese voice, adding subtitles, the brand watermark, and signature music.
 - Mix signature music as a quiet background bed. The mock profile uses a
   `-24 dB` base gain, loops for the asset duration, fades in for `0.75 s`, and
-  fades out for `1.0 s`. Speech-aware compression uses threshold `0.02`, ratio
-  `8:1`, `20 ms` attack, and `450 ms` release so music falls during narration
-  and rises gently in gaps. A missing configured music file rejects the render
+  fades out for `1.0 s`. A missing configured music file rejects the render
   before FFmpeg starts; replacing the file and retrying the render stage reuses
-  verified assets.
-- TikTok uploads each 9:16 chunk as a draft for the MVP. Prepared caption and
+  verified assets. The mock profile's ducking numbers (threshold `0.02`, ratio
+  `8:1`, `450 ms` release) are **superseded** - see "Signature music level"
+  below for why they made the bed inaudible.
+- TikTok uploads each 16:9 chunk as a draft for the MVP. Prepared caption and
   hashtags are copied during manual draft completion.
 - One Telegram approval temporarily authorizes the complete campaign revision
   across all selected brand profiles and platforms.
@@ -136,15 +140,14 @@ Last updated: 2026-09-17
 ## Render topology
 
 - A media manifest declares its `topology` explicitly.
-- `clean_lineage` is the original two-stage topology: one `clean_whole`, `N`
-  `clean_vertical`, and per brand one `branded_whole` and `N` `branded_vertical`
-  whose `lineage_asset_id` points at the clean master they derive from. It
-  remains supported for the legacy library presets and mock brand profiles.
-- `brand_owned` is the single-pass topology for `brand.v1` layouts: per brand
-  one `branded_whole` and `N` `branded_vertical` rendered straight from the
-  source, with no clean assets and no lineage. A brand-owned manifest records
-  `brand_revisions` so the exact published brand revision behind every asset is
-  auditable and an approval can be invalidated when a brand is republished.
+- New renders first create one branded 1920x1080 whole asset per brand, then
+  create `N` 1920x1080 chunk assets by frame-accurately cutting that same
+  rendered file at the existing chunk boundaries. Each chunk records the whole
+  asset as lineage, so subtitles, voice, watermark, and signature music match
+  the corresponding section of the YouTube asset exactly.
+- `clean_lineage` and `brand_owned` remain historical topology names during the
+  migration. Existing v1 manifests and assets remain immutable evidence; new
+  landscape-chunk renders use a versioned manifest contract.
 - A brand-owned render job must name an explicit brand revision per brand. It
   must not consume a draft, for the same reason a visual preset could not.
 - A caller may ask for `"latest"` instead of a number. The render service
@@ -159,9 +162,8 @@ Last updated: 2026-09-17
 - `"latest"` never falls back to a draft. A brand with no published revision
   refuses the job, because the alternative is a render that silently uses a
   layout nobody approved.
-- The expected asset count per source is unchanged from the delivery contract:
-  a `brand_owned` revision still produces `brands * (1 + N)` delivery assets.
-  Only the intermediate clean masters disappear.
+- The expected delivery asset count per source remains `brands * (1 + N)`:
+  one landscape whole asset plus one landscape chunk asset per chunk and brand.
 
 ## Visual presets and host matting (historical; superseded by brand-owned layouts)
 
@@ -248,6 +250,57 @@ Last updated: 2026-09-17
   layouts for now. It has explicit loop, gain, fade, and speech-ducking
   settings; separate music by ratio is out of scope until explicitly decided.
 
+## Signature music level (confirmed 2026-09-17)
+
+- **The target is a ratio to the narration, not an absolute gain.** The bed sits
+  at a flat **45 %** of narration level, whether or not the host is speaking.
+  Reached in two operator passes: v12 was inaudible, a 30 % / 45 % ducked mix
+  was audible but still too quiet under speech, and the confirmed answer is
+  **no dip at all**.
+- `volume_db` is absolute gain on the music file, so the gain that lands on 45 %
+  depends on how that track was mastered. It is a per-brand number, derived
+  rather than copied between brands:
+  `volume_db = 20*log10(0.45 * rms(narration) / rms(music at unity))`.
+- **The schema ceiling moved from `-12` to `0` dB** in `brand.py:47` and
+  `brands.py:314`. The old ceiling was a proxy for "stay under the voice" from
+  when the mock profile sat at `-24 dB`, and it refused the `-7.7 dB` that
+  `an-so`'s quiet master needs. What remains is an anti-clipping bound only; the
+  mix ends in `alimiter=limit=0.98`.
+- **The prior ducked profile could not breathe between phrases.** Two
+  mock-profile settings prevented it:
+  threshold `0.02` (-34 dBFS) sits 14.1 dB *below* the narration, so at ratio
+  `8:1` the compressor held ~12.4 dB of gain reduction permanently; and release
+  `450 ms` outlives the 100-200 ms pauses in Vietnamese narration, so the bed
+  never recovered inside a sentence. Measured on the v12 render the bed was
+  **quieter in pauses than under speech** (-4.2 dB spread) - the opposite of the
+  intent.
+- Confirmed settings for `an-so`: `volume_db -7.9`, ratio **`1.0`**. Measured on
+  the rendered file: **44 % speaking, 45 % in pauses, +0.1 dB spread**. The
+  44 % is `alimiter=limit=0.98` working marginally harder now that voice and bed
+  sum louder - 0.2 dB, inaudible.
+- **`an-so` ends on the flat 45 % bed.** The music-only RMS peak control was
+  implemented and measured (85.1 % to 30.9 % in high-music windows), but the
+  operator found it too quiet and explicitly selected the 45 % flat version on
+  2026-09-17. `peak_control` is therefore absent from the `an-so` draft. It
+  remains an optional per-brand feature for a future music file, and still
+  never uses narration as its trigger.
+- **`ratio 1.0` is how ducking is switched off.** `SpeechDucking.enabled` is
+  `Literal[True]` in the schema and `_music_graph` always emits
+  `sidechaincompress`, but ratio `1.0` is unity gain, so the filter stays in the
+  graph and does nothing. No schema change was needed. `threshold`, `attack_ms`
+  and `release_ms` are then inert and kept only as a record of the last ducked
+  tuning.
+- The ducked 30 % / 45 % mix is kept as evidence at
+  `automation/data/previews/an-so-music-tuned-20s.mp4` in case a future brand
+  wants the bed to breathe; the settings that produced it were `volume_db -7.7`,
+  threshold `0.025`, ratio `3.0`, attack `20 ms`, release `200 ms`.
+- **How to measure.** Speech and music are uncorrelated, so per-frame
+  `sqrt(p(mix) - p(voice))` recovers the surviving bed from a finished mp4.
+  Divide that by the same graph run with ducking bypassed (`threshold 1.0,
+  ratio 1.0`) before reading a percentage, or the music's own swells are
+  mistaken for ducking. Sample-level correlation is useless after AAC - use the
+  envelope. Tool: `automation/data/_tools/duck_sweep.py`.
+
 ## Vietnamese voice engine
 
 - The render service speaks Vietnamese with **VieNeu-TTS v3 Turbo** on CUDA,
@@ -271,6 +324,25 @@ Last updated: 2026-09-17
 - Audio quality was never benchmarked, only speed. Operator acceptance of how
   the new voice sounds is a required gate, tracked in
   `features/vietnamese_voice_engine/todo.md`.
+
+## On-screen title (frozen)
+
+- **Confirmed 2026-09-17: the renderer draws no title.** A re-up carries its
+  title in the platform post — YouTube's title field, the Facebook post body,
+  the TikTok caption — so burning one into the frame duplicates it and costs
+  picture. This reverses the earlier assumption that every delivery asset shows
+  its title.
+- The freeze is a **service-wide switch**, `RENDER_FROZEN_TEXT`, defaulting to
+  `title`. It names text bindings or layer ids the renderer refuses to draw.
+- **Layouts keep their title layer.** Freezing is a rendering decision, not a
+  brand edit: position, size and colour survive untouched, so bringing titles
+  back is `RENDER_FROZEN_TEXT=` (empty) and no brand revision. This is why the
+  switch lives in the service and not in each brand's JSON.
+- A frozen layer is recorded on the asset's warnings, so a missing title is
+  explicable from the manifest rather than read as a render fault.
+- Evidence: `tests/test_brand_compose.py::TestFrozenText`, and the published
+  `an-so` revision 11 composing 0 `drawtext` steps in both aspects while both
+  layouts still list their `title` layer.
 
 ## Pending decisions
 

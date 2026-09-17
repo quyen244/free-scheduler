@@ -12,8 +12,8 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
 ## Confirmed product decisions
 
 - [x] YouTube receives one whole 16:9 video per source.
-- [x] Facebook Pages receive one 9:16 post per chunk.
-- [x] TikTok receives one 9:16 draft per chunk for the MVP.
+- [x] Facebook Pages receive one 16:9 landscape post per chunk.
+- [x] TikTok receives one 16:9 landscape draft per chunk for the MVP.
 - [x] One Telegram approval authorizes the whole selected campaign fan-out.
 - [x] Facebook destinations are administered Pages.
 - [x] Accept a URL-only YouTube submission for the MVP; require readable
@@ -112,6 +112,6 @@ flowchart LR
 ## Pipeline-correctness milestone
 
 Before connecting real publishers, one accepted source must create a valid
-whole 16:9 asset, every required 9:16 chunk, selected metadata, mock-branded
+whole 16:9 asset, every required 16:9 landscape chunk, selected metadata, mock-branded
 variants, and a complete manifest. A failed stage must be resumable without
 repeating successful work.

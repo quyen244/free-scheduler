@@ -37,7 +37,9 @@ class PreviewBrandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     revision: int | Literal["latest"] = "latest"
-    variants: Literal["all", "landscape", "vertical"] = "all"
+    # All preview delivery outputs are landscape now. `whole` selects the
+    # YouTube asset; `chunks` selects one or more Facebook/TikTok assets.
+    variants: Literal["all", "whole", "chunks"] = "all"
     chunks: list[int] | None = Field(default=None, min_length=1, max_length=100)
 
     @model_validator(mode="after")
@@ -45,8 +47,8 @@ class PreviewBrandRequest(BaseModel):
         if self.revision != "latest" and self.revision < 1:
             raise ValueError("a brand revision is a positive integer or 'latest'")
         if self.chunks is not None:
-            if self.variants == "landscape":
-                raise ValueError("chunks may only be used with all or vertical variants")
+            if self.variants == "whole":
+                raise ValueError("chunks may only be used with all or chunks variants")
             if any(chunk < 1 for chunk in self.chunks):
                 raise ValueError("chunks are one-based positive integers")
             if len(self.chunks) != len(set(self.chunks)):
@@ -85,7 +87,6 @@ class MediaRevisionJobRequest(BaseModel):
     brand_ids: list[str] = Field(
         default_factory=lambda: ["mock-brand"], min_length=1, max_length=10
     )
-    vertical_preset: str = "vertical-clean"
     landscape_preset: str = "yt-landscape"
     metadata_revision_id: str | None = None
     preset_id: str | None = None

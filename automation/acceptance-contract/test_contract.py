@@ -99,7 +99,7 @@ class PipelineAcceptanceContractTests(unittest.TestCase):
         no_chunks = self.snapshot()
         no_chunks["chunks"] = []
         no_chunks["metadata"]["chunks"] = []
-        no_chunks["assets"]["vertical"] = []
+        no_chunks["assets"]["chunks"] = []
         no_chunks["targets"] = no_chunks["targets"][:1]
         self.assertTrue(any("at least one chunk" in error for error in validate_snapshot(no_chunks, self.policy)))
 
@@ -123,12 +123,51 @@ class PipelineAcceptanceContractTests(unittest.TestCase):
     def test_one_brand_three_chunks_has_correct_assets_and_exactly_seven_targets(self):
         snapshot = self.snapshot()
         self.assertEqual((snapshot["assets"]["whole"]["width"], snapshot["assets"]["whole"]["height"]), (1920, 1080))
-        self.assertEqual(len(snapshot["assets"]["vertical"]), 3)
-        self.assertTrue(all((asset["width"], asset["height"]) == (1080, 1920) for asset in snapshot["assets"]["vertical"]))
+        self.assertEqual(len(snapshot["assets"]["chunks"]), 3)
+        self.assertTrue(all((asset["width"], asset["height"]) == (1920, 1080) for asset in snapshot["assets"]["chunks"]))
         self.assertEqual(len(snapshot["targets"]), 7)
         self.assertEqual(sum(target["platform"] == "youtube" for target in snapshot["targets"]), 1)
         self.assertEqual(sum(target["platform"] == "facebook" for target in snapshot["targets"]), 3)
         self.assertEqual(sum(target["platform"] == "tiktok" for target in snapshot["targets"]), 3)
+
+    def test_a_chunk_that_names_no_parent_whole_is_rejected(self):
+        """A chunk is a cut of the whole, so it must say which whole it came from.
+
+        Without this a snapshot could offer a separately rendered file as the
+        chunk, and the guarantee the topology exists for - that Facebook and
+        TikTok see exactly what YouTube sees at that moment - would be gone
+        with nothing in the contract noticing.
+        """
+        orphan = self.snapshot()
+        orphan["assets"]["chunks"][1].pop("lineage_asset_id")
+        self.assertTrue(
+            any("cut from this brand" in error for error in validate_snapshot(orphan, self.policy))
+        )
+
+        foreign = self.snapshot()
+        foreign["assets"]["chunks"][0]["lineage_asset_id"] = "asset-some-other-brand-16x9"
+        self.assertTrue(
+            any("cut from this brand" in error for error in validate_snapshot(foreign, self.policy))
+        )
+
+    def test_the_whole_asset_may_not_claim_a_parent(self):
+        # It is rendered from source. A parent would mean the topology was
+        # read backwards, with YouTube served from one of its own chunks.
+        snapshot = self.snapshot()
+        snapshot["assets"]["whole"]["lineage_asset_id"] = snapshot["assets"]["chunks"][0]["id"]
+        self.assertTrue(
+            any("no parent" in error for error in validate_snapshot(snapshot, self.policy))
+        )
+
+    def test_a_vertical_chunk_asset_is_no_longer_accepted(self):
+        # The old 1080x1920 delivery shape must fail loudly rather than pass
+        # through a validator that stopped checking.
+        snapshot = self.snapshot()
+        snapshot["assets"]["chunks"][0]["width"] = 1080
+        snapshot["assets"]["chunks"][0]["height"] = 1920
+        self.assertTrue(
+            any("1920x1080" in error for error in validate_snapshot(snapshot, self.policy))
+        )
 
     def test_same_brand_facebook_and_tiktok_reuse_each_chunk_asset(self):
         snapshot = self.snapshot()
@@ -168,7 +207,7 @@ class PipelineAcceptanceContractTests(unittest.TestCase):
         self.assertTrue(approve(metadata_edit, "revision-2", self.policy))
         visual_edit = apply_edit(snapshot, "visual_text")
         self.assertTrue(visual_edit["assets"]["whole"]["stale"])
-        self.assertTrue(all(asset["stale"] for asset in visual_edit["assets"]["vertical"]))
+        self.assertTrue(all(asset["stale"] for asset in visual_edit["assets"]["chunks"]))
         with self.assertRaises(ContractViolation):
             approve(visual_edit, "revision-2", self.policy)
 
@@ -176,7 +215,7 @@ class PipelineAcceptanceContractTests(unittest.TestCase):
         snapshot = self.snapshot()
         youtube_target = next(target for target in snapshot["targets"] if target["platform"] == "youtube")
         youtube_target["unit"] = "chunk"
-        youtube_target["asset_id"] = snapshot["assets"]["vertical"][0]["id"]
+        youtube_target["asset_id"] = snapshot["assets"]["chunks"][0]["id"]
         self.assertTrue(any("YouTube" in error for error in validate_snapshot(snapshot, self.policy)))
 
     def test_tiktok_success_is_draft_delivered_not_publicly_published(self):

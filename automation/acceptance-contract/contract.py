@@ -126,18 +126,22 @@ def build_snapshot(source_fixture: dict, policy: dict) -> dict:
         "stale": False,
         "path": f"outputs/brands/{brand_id}/revision/1/whole-16x9.mp4",
     }
-    vertical_assets = [
+    # Every delivery asset is 16:9, and a chunk is a frame-accurate cut of the
+    # brand's own whole rather than a second render. `lineage_asset_id` names
+    # that parent, so a snapshot cannot claim a chunk that no whole produced.
+    chunk_assets = [
         {
-            "id": f"asset-{chunk['name']}-9x16",
+            "id": f"asset-{chunk['name']}-16x9",
             "kind": "chunk",
             "content_item_id": chunk["id"],
             "brand_id": brand_id,
-            "width": 1080,
-            "height": 1920,
+            "width": 1920,
+            "height": 1080,
             "stale": False,
+            "lineage_asset_id": whole_asset["id"],
             "path": (
-                f"outputs/brands/{brand_id}/revision/1/vertical/"
-                f"{chunk['name']}-9x16.mp4"
+                f"outputs/brands/{brand_id}/revision/1/landscape/"
+                f"{chunk['name']}-16x9.mp4"
             ),
         }
         for chunk in chunks
@@ -159,7 +163,7 @@ def build_snapshot(source_fixture: dict, policy: dict) -> dict:
                 "idempotency_key": f"{revision_id}:youtube:{account_id}:whole-video",
             }
         )
-    for chunk, asset in zip(chunks, vertical_assets):
+    for chunk, asset in zip(chunks, chunk_assets):
         for platform in ("facebook", "tiktok"):
             for account_id in accounts[platform]:
                 targets.append(
@@ -182,7 +186,7 @@ def build_snapshot(source_fixture: dict, policy: dict) -> dict:
                 )
 
     return {
-        "schema_version": "step1.v1",
+        "schema_version": "step1.v2",
         "source": {
             "id": source_fixture["id"],
             "youtube_id": source_fixture["youtube_id"],
@@ -222,7 +226,7 @@ def build_snapshot(source_fixture: dict, policy: dict) -> dict:
                 for chunk in chunks
             ],
         },
-        "assets": {"whole": whole_asset, "vertical": vertical_assets},
+        "assets": {"whole": whole_asset, "chunks": chunk_assets},
         "targets": targets,
         "audit": [],
     }
@@ -327,22 +331,30 @@ def validate_snapshot(snapshot: dict, policy: dict) -> list[str]:
     brand = snapshot.get("brand", {})
     assets = snapshot.get("assets", {})
     whole_asset = assets.get("whole")
-    vertical_assets = assets.get("vertical", [])
+    chunk_assets = assets.get("chunks", [])
     if not whole_asset or (whole_asset.get("width"), whole_asset.get("height")) != (1920, 1080):
         errors.append("assets: one branded 1920x1080 whole asset is required")
-    if len(vertical_assets) != len(chunks):
-        errors.append("assets: one branded vertical asset is required per chunk")
-    vertical_by_content = {asset.get("content_item_id"): asset for asset in vertical_assets}
-    if any((asset.get("width"), asset.get("height")) != (1080, 1920) for asset in vertical_assets):
-        errors.append("assets: every chunk asset must be 1080x1920")
+    if len(chunk_assets) != len(chunks):
+        errors.append("assets: one branded chunk asset is required per chunk")
+    chunk_by_content = {asset.get("content_item_id"): asset for asset in chunk_assets}
+    if any((asset.get("width"), asset.get("height")) != (1920, 1080) for asset in chunk_assets):
+        errors.append("assets: every chunk asset must be 1920x1080")
     if whole_asset and whole_asset.get("brand_id") != brand.get("id"):
         errors.append("assets: the whole asset belongs to the wrong brand")
-    if any(asset.get("brand_id") != brand.get("id") for asset in vertical_assets):
-        errors.append("assets: a vertical asset belongs to the wrong brand")
+    if any(asset.get("brand_id") != brand.get("id") for asset in chunk_assets):
+        errors.append("assets: a chunk asset belongs to the wrong brand")
+    # A chunk that does not name this brand's whole as its parent was rendered
+    # some other way, so it carries no promise of matching what YouTube gets.
+    if whole_asset and any(
+        asset.get("lineage_asset_id") != whole_asset.get("id") for asset in chunk_assets
+    ):
+        errors.append("assets: every chunk asset must be cut from this brand's whole asset")
+    if whole_asset and whole_asset.get("lineage_asset_id") is not None:
+        errors.append("assets: the whole asset is rendered from source and has no parent")
     if whole_asset and whole_asset.get("stale"):
         errors.append("assets: stale whole asset must be rerendered before approval")
-    if any(asset.get("stale") for asset in vertical_assets):
-        errors.append("assets: stale vertical assets must be rerendered before approval")
+    if any(asset.get("stale") for asset in chunk_assets):
+        errors.append("assets: stale chunk assets must be rerendered before approval")
 
     targets = snapshot.get("targets", [])
     accounts = brand.get("accounts", {"youtube": [], "facebook": [], "tiktok": []})
@@ -363,7 +375,7 @@ def validate_snapshot(snapshot: dict, policy: dict) -> list[str]:
             if target.get("unit") != "whole" or not whole_asset or target.get("asset_id") != whole_asset.get("id"):
                 errors.append("targets: YouTube must reference the branded whole asset")
         elif platform in {"facebook", "tiktok"}:
-            asset = vertical_by_content.get(target.get("content_item_id"))
+            asset = chunk_by_content.get(target.get("content_item_id"))
             if target.get("unit") != "chunk" or not asset or target.get("asset_id") != asset.get("id"):
                 errors.append(f"targets: {platform} must reference its same-brand chunk asset")
             if platform == "tiktok":
@@ -421,7 +433,7 @@ def apply_edit(snapshot: dict, edit_kind: str) -> dict:
     }
     rerender_required = edit_kind in {"visual_text", "brand"}
     edited["assets"]["whole"]["stale"] = rerender_required
-    for asset in edited["assets"]["vertical"]:
+    for asset in edited["assets"]["chunks"]:
         asset["stale"] = rerender_required
     for target in edited["targets"]:
         target["revision_id"] = revision_id

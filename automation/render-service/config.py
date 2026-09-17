@@ -43,6 +43,13 @@ class Settings:
     # runtime asset on the bind mount, just like the TTS weights, so rebuilding
     # the service never downloads it again.
     rvm_model_dir: Path
+    # Text bindings the renderer refuses to draw, service-wide. The layouts
+    # keep their title layer - position, size and colour survive - but nothing
+    # is drawn for it, so turning titles back on is one variable and no brand
+    # revision. Confirmed 2026-09-17: a re-up carries its title in the platform
+    # post, not burned into the picture. Set `RENDER_FROZEN_TEXT=` (empty) to
+    # draw them again.
+    frozen_text: frozenset[str]
 
 
 def _int(name: str, default: int, minimum: int = 1) -> int:
@@ -89,6 +96,19 @@ def _device(name: str, default: str) -> str:
     return value
 
 
+def _frozen_text(name: str, default: str) -> frozenset[str]:
+    """Text layers to skip, by binding or by id.
+
+    Empty is meaningful here and is *not* the same as unset: an unset variable
+    takes the default, while `RENDER_FROZEN_TEXT=` is an operator saying
+    "freeze nothing", which is how the title comes back.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        raw = default
+    return frozenset(part.strip() for part in raw.split(",") if part.strip())
+
+
 def load_settings() -> Settings:
     return Settings(
         data_dir=Path(os.environ.get("DATA_DIR", "/data")),
@@ -103,6 +123,7 @@ def load_settings() -> Settings:
         min_ratio=_float("TTS_MIN_RATIO", 0.75),
         max_ratio=_float("TTS_MAX_RATIO", 1.35),
         rvm_model_dir=Path(os.environ.get("RVM_MODEL_DIR", "/models/rvm")),
+        frozen_text=_frozen_text("RENDER_FROZEN_TEXT", "title"),
     )
 
 

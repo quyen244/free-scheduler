@@ -14,3 +14,9 @@ contract tests source validation, chunk topology, metadata shape, media ratios,
 brand reuse, target fan-out, approval, revision invalidation, and TikTok draft
 semantics. Later production services must produce snapshots that satisfy the
 same rules.
+
+Snapshots are `step1.v2`. Every delivery asset is 1920x1080 and each chunk
+asset names its brand's whole asset in `lineage_asset_id`, matching the
+landscape-chunk delivery decision and `media-manifest.v2`. The `step1.v1`
+shape - `assets.vertical`, 1080x1920, no lineage - described the retired
+vertical topology and is no longer produced or accepted.
