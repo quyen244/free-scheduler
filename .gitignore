@@ -75,3 +75,6 @@ next-env.d.ts
 *.m4v
 
 /automation/data/presets
+
+
+*.yaml

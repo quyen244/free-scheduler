@@ -37,6 +37,10 @@ class Source:
     width: int
     height: int
     duration_s: float
+    # Keep generated canvas frames in lockstep with the source. A fixed 30 fps
+    # canvas duplicates frames for common 23.976/25 fps sources, making every
+    # CPU filter and the encoder process work that cannot improve the result.
+    frame_rate: str = "30"
 
 
 def probe(path: Path) -> Source:
@@ -44,7 +48,7 @@ def probe(path: Path) -> Source:
         [
             "ffprobe", "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height:format=duration",
+            "-show_entries", "stream=width,height,r_frame_rate:format=duration",
             "-of", "json", str(path),
         ],
         check=True, capture_output=True, text=True,
@@ -55,7 +59,21 @@ def probe(path: Path) -> Source:
         width=int(stream["width"]),
         height=int(stream["height"]),
         duration_s=float(data["format"]["duration"]),
+        frame_rate=_valid_frame_rate(str(stream.get("r_frame_rate") or "30")),
     )
+
+
+def _valid_frame_rate(value: str) -> str:
+    """Return an ffmpeg-safe positive source frame rate, with a stable fallback."""
+    try:
+        numerator, denominator = (
+            (int(part) for part in value.split("/", 1))
+            if "/" in value
+            else (int(value), 1)
+        )
+    except ValueError:
+        return "30"
+    return value if numerator > 0 and denominator > 0 else "30"
 
 
 PREFERRED_ENCODER = "h264_nvenc"
@@ -307,7 +325,7 @@ _FIRST_OPTIONAL_INPUT = 3
 
 
 def _background_args(
-    preset: dict, geometry: presets.Geometry, duration_s: float
+    preset: dict, geometry: presets.Geometry, duration_s: float, frame_rate: str = "30"
 ) -> list[str]:
     """Input 1: the still behind everything, or a black canvas when unset.
 
@@ -319,7 +337,10 @@ def _background_args(
         return [
             "-f", "lavfi",
             "-t", f"{duration_s:.3f}",
-            "-i", f"color=c=black:s={geometry.canvas_w}x{geometry.canvas_h}:r=30",
+            "-i", (
+                f"color=c=black:s={geometry.canvas_w}x{geometry.canvas_h}:"
+                f"r={_valid_frame_rate(frame_rate)}"
+            ),
         ]
     return [
         "-loop", "1",
@@ -802,7 +823,7 @@ def render_clean_whole(
         "error",
         "-i",
         str(raw),
-        *_background_args(preset, geometry, source.duration_s),
+        *_background_args(preset, geometry, source.duration_s, source.frame_rate),
         "-i",
         str(voice),
         *extra_inputs,
@@ -933,7 +954,7 @@ def render_clean_vertical(
         f"{duration_s:.3f}",
         "-i",
         str(raw),
-        *_background_args(preset, geometry, duration_s),
+        *_background_args(preset, geometry, duration_s, source.frame_rate),
         "-ss",
         f"{start_s:.3f}",
         "-t",
@@ -1116,7 +1137,7 @@ def render_brand_variant(
     command = [
         "ffmpeg", "-y", "-loglevel", "error",
         *span, "-i", str(raw),
-        *_background_args(config, geometry, duration_s),
+        *_background_args(config, geometry, duration_s, source.frame_rate),
         *span, "-i", str(voice),
         *extra_inputs,
         *music_inputs,

@@ -52,6 +52,9 @@ Status legend: `[ ]` not started, `[-]` in progress, `[x]` complete, `[!]` block
   - root YAML plans can render only chosen brand variants/chunks without
     creating delivery-ready media; ratio-specific backgrounds and the
     brand-level signature-music editor are included.
+- [-] [Render performance and GPU composition](render_performance/todo.md)
+  - source-cadence correction is verified; staged CUDA composition remains a
+    guarded, parity-tested implementation task.
 - [ ] [Platform sandbox](platform_sandbox/todo.md)
 
 ## P1 — first reliable YouTube vertical slice

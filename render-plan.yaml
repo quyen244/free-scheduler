@@ -6,5 +6,5 @@ video_id: hS3VXBeEv0I
 brands:
   an-so:
     revision: latest
-    variants: vertical # all | landscape | vertical
+    variants: all # all | landscape | vertical
     chunks: [1]       # one-based; allowed for all and vertical only
