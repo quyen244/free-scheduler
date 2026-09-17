@@ -1,6 +1,6 @@
 # Confirmed product decisions
 
-Last updated: 2026-09-16
+Last updated: 2026-09-17
 
 ## Source input
 
@@ -247,6 +247,30 @@ Last updated: 2026-09-16
 - Signature music is one optional, versioned brand-level asset shared by both
   layouts for now. It has explicit loop, gain, fade, and speech-ducking
   settings; separate music by ratio is out of scope until explicitly decided.
+
+## Vietnamese voice engine
+
+- The render service speaks Vietnamese with **VieNeu-TTS v3 Turbo** on CUDA,
+  batched at 32, using the **Minh Quân** preset. This replaces ZeroTTS, decided
+  2026-09-17 on measured evidence: on 64 real cues from the project's own
+  transcript, VieNeu at batch 32 ran at RTF 20.62x against ZeroTTS's 0.86x in
+  its shipped configuration. Evidence:
+  `reports/vieneu-tts-gpu-benchmark-2026-09-17.md`.
+- Batch 32 is the chosen size because the throughput curve is flat past it
+  while VRAM roughly doubles. Peak VRAM at 32 is ~2.0 GB of 6.0 GB.
+- **The render-service GPU image is no longer torch-free.** `vieneu[cuda]`
+  brings torch, torchaudio and transformers. This supersedes the earlier
+  premise that ONNX-without-torch was required to keep the GPU free for other
+  work: a render holds ~1.1 GB and VieNeu ~2.0 GB of 6.0 GB, so both fit.
+- **The voice namespace changed and is not migrated.** ZeroTTS's eight voices
+  and VieNeu's twenty-five do not overlap, and `maichi` does not exist in
+  VieNeu. Voice manifests naming a ZeroTTS voice are kept as history; the
+  tracks they describe cannot be reproduced by the current engine. Re-voicing a
+  campaign that already has approval creates a new revision, unchanged from the
+  general rule above.
+- Audio quality was never benchmarked, only speed. Operator acceptance of how
+  the new voice sounds is a required gate, tracked in
+  `features/vietnamese_voice_engine/todo.md`.
 
 ## Pending decisions
 

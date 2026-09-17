@@ -54,6 +54,8 @@ next-env.d.ts
 /automation/**/__pycache__/
 /automation/**/.pytest_cache/
 /automation/**/*.pyc
+/automation/vieneu-tts-benchmark
+
 
 # Local work products and visual/media assets (do not commit)
 /features/

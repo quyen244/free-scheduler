@@ -7,7 +7,15 @@ httpx==0.28.1
 # gets skipped exactly when it matters.
 pytest==8.3.4
 PyYAML==6.0.2
-# Vietnamese TTS on ONNX Runtime — no torch, so 0 MB of VRAM. That is the
-# whole reason it was picked over XTTS-v2: all 6 GB stays with Whisper.
-zerotts==0.1.2
+# Vietnamese TTS. The `cuda` extra is the v3 Turbo PyTorch backend, which is
+# what makes `infer_batch` worth having: batched at 32 it measured RTF 20.62x
+# against ZeroTTS's 0.86x on the same 64 real cues. That extra brings torch,
+# torchaudio and transformers, so this image is no longer torch-free — a
+# reversal decided on measurement, see features/_shared/decisions.md. It holds
+# ~2.0 GB of VRAM at batch 32 and a render holds ~1.1 GB, so 6 GB fits both.
+#
+# `resemble-perth` (the `watermark` extra) is deliberately not installed:
+# without it `_apply_watermark` is a no-op, which is the arrangement the
+# benchmark timings were taken under.
+vieneu[cuda]==3.8.1
 numpy==2.5.3

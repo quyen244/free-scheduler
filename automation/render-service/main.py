@@ -94,12 +94,13 @@ async def health() -> dict[str, object]:
 
 @app.get("/voices")
 async def list_voices() -> dict[str, object]:
-    """The voice enum, without loading the model.
+    """The preset voices, without loading the model.
 
-    ZeroTTS 0.1.2 still cannot build a voice from a reference clip — the voice
-    encoder is unpublished — so this list is the whole choice available.
+    Read from VieNeu's bundled voice table rather than from a loaded model, so
+    this stays a cheap call. Aliases are accepted on a job request but not
+    listed here; the canonical names are what a manifest records.
     """
-    return {"voices": list(voice.SHIPPED_VOICES), "default": settings.voice}
+    return {"voices": list(voice.available_voices()), "default": settings.voice}
 
 
 @app.get("/preset-editor/rvm")

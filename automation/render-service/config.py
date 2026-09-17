@@ -6,32 +6,25 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
-    # Where the ZeroTTS weights are cached. Bind-mounted, so a rebuild does not
-    # re-download 900 MB.
+    # Where the TTS weights are cached. Bind-mounted, so a rebuild does not
+    # re-download them.
     model_dir: Path
     voice: str
     # The preset a render falls back to when the request does not name one.
     # A default rather than a required field: this box runs one channel, and
     # making every caller repeat its name is how they drift apart.
     preset: str
-    # ONNX Runtime intra-op threads. More is slower, measurably: on this
-    # 12-core box, 4 threads runs at 11 s per segment, 8 at 16 s and 12 at
-    # 24 s. The graph is small enough that the synchronisation costs more than
-    # the parallelism buys, so ZeroTTS's own default of 4 is kept.
-    tts_threads: int
-    # How many ONNX sessions may run at once. Raising `tts_threads` makes the
-    # graph slower, so this is the only knob that uses the idle cores: one
-    # session at four threads leaves seven of twelve busy doing nothing.
-    # Each session holds its own copy of the weights, so this is bounded by
-    # memory, not by cores - see render-service/README.md.
-    tts_workers: int
-    # Which ONNX Runtime execution provider the sessions must use: "cpu" or
-    # "cuda". Explicit, and not "whichever is available", because ONNX Runtime
-    # builds a session on the CPU without complaining when the CUDA libraries
-    # are missing. That is how a GPU image reports a plausible CPU number under
-    # a GPU heading - see reports/tts-spike.md. Asking by name lets the loader
-    # check what it actually got.
-    tts_provider: str
+    # How many chunks VieNeu folds into one forward pass. 32 is where the
+    # throughput curve flattens on this card: measured on 64 real cues, RTF
+    # went 5.93x at 1, 9.77x at 10, 12.99x at 20 and 20.62x at 32, then stopped
+    # moving while peak VRAM kept climbing (2.0 GB at 32, 3.6 GB at 64). See
+    # reports/vieneu-tts-gpu-benchmark-2026-09-17.md.
+    tts_batch_size: int
+    # "cuda" or "cpu", named explicitly rather than probed. A GPU deployment
+    # that quietly fell back to the CPU would report a plausible number under a
+    # GPU heading, which is the same trap the old ONNX provider setting existed
+    # to avoid; the loader checks that it got what was asked for.
+    tts_device: str
     # How many delivery assets may encode at once. One ffmpeg render keeps
     # only 2.5 of this box's 12 logical cores busy: its filter graph is a
     # chain, and `libass`, `drawtext`, `alphamerge` and `overlay` do not slice
@@ -85,8 +78,8 @@ def _float(name: str, default: float, minimum: float = 0.0) -> float:
     return value
 
 
-def _provider(name: str, default: str) -> str:
-    """The execution provider, lower-cased, or a clear reason why not."""
+def _device(name: str, default: str) -> str:
+    """The torch device, lower-cased, or a clear reason why not."""
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
         return default
@@ -100,11 +93,12 @@ def load_settings() -> Settings:
     return Settings(
         data_dir=Path(os.environ.get("DATA_DIR", "/data")),
         model_dir=Path(os.environ.get("TTS_MODEL_DIR", "/models")),
-        voice=os.environ.get("TTS_VOICE", "maichi"),
+        # A VieNeu preset name or one of its aliases. "Minh Quân" is the alias
+        # of "Minh Quân Pro", the model's own default preset.
+        voice=os.environ.get("TTS_VOICE", "Minh Quân"),
         preset=os.environ.get("DEFAULT_PRESET", "bi-mat-bi-an"),
-        tts_threads=_int("TTS_THREADS", 4),
-        tts_workers=_int("TTS_WORKERS", 1),
-        tts_provider=_provider("TTS_PROVIDER", "cpu"),
+        tts_batch_size=_int("TTS_BATCH_SIZE", 32),
+        tts_device=_device("TTS_DEVICE", "cuda"),
         render_workers=max(_int("RENDER_WORKERS", 3), 1),
         min_ratio=_float("TTS_MIN_RATIO", 0.75),
         max_ratio=_float("TTS_MAX_RATIO", 1.35),
@@ -115,6 +109,6 @@ def load_settings() -> Settings:
 settings = load_settings()
 
 # Set before anything imports huggingface_hub, which reads it once at import
-# time. Without it the ~900 MB of ZeroTTS weights land in the container's own
-# filesystem and are re-downloaded on every rebuild.
+# time. Without it the VieNeu weights land in the container's own filesystem
+# and are re-downloaded on every rebuild.
 os.environ.setdefault("HF_HOME", str(settings.model_dir))

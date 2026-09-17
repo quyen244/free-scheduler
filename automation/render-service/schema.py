@@ -5,8 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class VoiceJobRequest(BaseModel):
     video_id: str
-    # Defaults to the service's configured voice. An enum over the eight
-    # ZeroTTS ships, not a free string — see voice.SHIPPED_VOICES.
+    # Defaults to the service's configured voice. Validated against VieNeu's
+    # preset table, aliases included, before any weights load — see
+    # voice.check_voice.
     voice: str | None = None
     # n8n's Wait-node resume URL. Optional so the endpoint stays usable from a
     # terminal, where there is nothing to resume.

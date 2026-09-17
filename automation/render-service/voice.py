@@ -1,20 +1,31 @@
-"""Vietnamese speech, one Whisper segment at a time.
+"""Vietnamese speech, batched.
 
-ZeroTTS runs on ONNX Runtime with no torch, which is why it was picked over
-XTTS-v2 on this box: it runs well on the CPU and it can take the GPU when
-there is one. Which of the two it uses is `TTS_PROVIDER`, a deployment
-decision - the CPU image ships only the CPU wheel, so it is the only answer
-there.
+VieNeu-TTS v3 Turbo on CUDA. It replaced ZeroTTS on 2026-09-17 because the
+voice stage was the longest in the pipeline and batching moves it by an order
+of magnitude: on 64 real cues from this project's own transcript, ZeroTTS ran
+at RTF 0.86x in its shipped configuration and VieNeu at 20.62x with
+`batch_size=32`. Numbers in reports/vieneu-tts-gpu-benchmark-2026-09-17.md.
+
+The shape of the work changed with it. ZeroTTS was one segment per call, so
+concurrency meant a pool of ONNX sessions racing on the idle cores. VieNeu's
+speed comes from the opposite direction: it flattens the chunks of many texts
+into one forward pass, so this module hands it whole groups of segments and
+keeps a single model. There is no session pool and no thread pool here any
+more - `TTS_THREADS`, `TTS_WORKERS` and `TTS_PROVIDER` were ONNX knobs and are
+gone.
+
+Text normalisation is also the model's job now. ZeroTTS needed
+`normalize_vi_text` called by hand or it read `31/12/2026` as digits; VieNeu
+delegates to sea-g2p internally, so there is no separate normalise step to
+forget.
 """
 
+import json
 import logging
-import queue
 import shutil
 import subprocess
 import tempfile
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
@@ -27,262 +38,161 @@ from errors import EmptyTranscriptError, SynthesisError, UnknownVoiceError
 
 logger = logging.getLogger(__name__)
 
-# The eight voices ZeroTTS 0.1.2 ships, verified against `tts.list_voices()`
-# and re-checked at load time below. An enum rather than a free string because
-# the voice encoder is still unpublished: the package can load voices but
-# cannot make one from a reference clip, so anything outside this set is a typo
-# and deserves a 400 rather than a failure 40 segments into a job.
-SHIPPED_VOICES = (
-    "baotrang",
-    "giahuy",
-    "hamy",
-    "huuduc",
-    "kimoanh",
-    "maichi",
-    "quangminh",
-    "tiendat",
-)
+# One model, not a pool. Loading is expensive (~25 s warm) and a second copy
+# would buy nothing: the batch already fills the card.
+_model = None
+_model_lock = threading.RLock()
 
-# A pool of ONNX sessions rather than one behind a lock.
-#
-# One session with four threads leaves seven of this box's twelve cores idle -
-# measured, not guessed - and raising `intra_op_num_threads` makes the graph
-# *slower*, so the only way to use those cores is more sessions. Sessions are
-# built on demand and never torn down, so a service configured for one worker
-# behaves exactly as it did before.
-_sessions: list = []
-_available: "queue.Queue" = queue.Queue()
-# Lowered from `settings.tts_workers` when a session cannot be built, which on
-# this box means it did not fit in memory.
-_cap: int | None = None
-_pool_lock = threading.RLock()
-
-# A borrower always returns its session in a `finally`, so waiting forever
-# would mean a worker thread died without unwinding. Bounded so that shows up
-# as an error rather than as a job that never ends.
-_BORROW_TIMEOUT_S = 3600.0
+# Cached preset table, read from the installed package rather than from a
+# loaded model - see `_presets`.
+_preset_cache: tuple[dict[str, str], str] | None = None
 
 
 def is_loaded() -> bool:
-    return bool(_sessions)
+    return _model is not None
 
 
-def reset_pool() -> None:
-    """Drop every session. Tests only - a running service never needs this."""
-    global _cap
-    with _pool_lock:
-        _sessions.clear()
-        _cap = None
-        while True:
-            try:
-                _available.get_nowait()
-            except queue.Empty:
-                break
+def reset_model() -> None:
+    """Drop the model. Tests only - a running service never needs this."""
+    global _model
+    with _model_lock:
+        _model = None
+
+
+def _presets() -> tuple[dict[str, str], str]:
+    """Every accepted voice name mapped to its canonical preset, and the default.
+
+    Read straight from the package's `voices_v3_turbo.json` rather than from a
+    loaded model, so a typo in a voice name is rejected in milliseconds instead
+    of after the twenty-five seconds it takes to bring the weights up.
+    """
+    global _preset_cache
+    if _preset_cache is not None:
+        return _preset_cache
+
+    import vieneu
+
+    path = Path(vieneu.__file__).parent / "assets" / "voices_v3_turbo.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise SynthesisError(f"could not read VieNeu's voice list at {path}: {exc}") from exc
+
+    presets = data.get("presets") or {}
+    if not presets:
+        raise SynthesisError(f"VieNeu's voice list at {path} contains no presets")
+
+    # A real preset name always wins over an alias pointing elsewhere, so the
+    # canonical names go in first and aliases only fill gaps.
+    resolved = {name: name for name in presets}
+    for name, entry in presets.items():
+        for alias in entry.get("aliases") or []:
+            resolved.setdefault(alias, name)
+
+    _preset_cache = (resolved, data.get("default_voice") or "")
+    return _preset_cache
+
+
+def available_voices() -> tuple[str, ...]:
+    """The canonical preset names, sorted."""
+    resolved, _ = _presets()
+    return tuple(sorted(set(resolved.values())))
 
 
 def check_voice(voice: str) -> str:
-    if voice not in SHIPPED_VOICES:
+    """Resolve a preset name or alias, or say what the real ones are.
+
+    Returns the canonical preset rather than what was asked for: `Minh Quân` is
+    an alias of `Minh Quân Pro`, and the manifest should record the name that
+    reproduces the track even if the alias is later repointed.
+    """
+    resolved, _ = _presets()
+    canonical = resolved.get(voice)
+    if canonical is None:
         raise UnknownVoiceError(
-            f"unknown voice {voice!r}; ZeroTTS ships {', '.join(SHIPPED_VOICES)}"
+            f"unknown voice {voice!r}; VieNeu ships {', '.join(available_voices())}"
         )
-    return voice
+    return canonical
 
 
 def get_model():
-    """One session, for callers that only need the model to exist."""
-    with _pool_lock:
-        if not _sessions:
-            if not fill_pool(1):
-                raise SynthesisError("no ZeroTTS session could be built")
-        return _sessions[0]
-
-
-def fill_pool(target: int) -> int:
-    """Build sessions up to `target` and return how many the pool now has.
-
-    Built up front rather than on first borrow. A borrower only grows the pool
-    when it finds the queue empty, so on short segments the first session comes
-    back before the second borrower ever looks - and a job asking for four
-    workers would quietly run on one. Building here also pays the load cost
-    once, before any work is timed, and surfaces a session that does not fit
-    while there is still nothing to lose.
-
-    Every session built here goes straight into the queue, because nobody is
-    holding it. `_build_session` leaves that to the caller.
-    """
-    with _pool_lock:
-        while len(_sessions) < target:
-            session = _build_session(target)
-            if session is None:
-                break
-            _available.put(session)
-        return len(_sessions)
-
-
-def _build_session(limit: int):
-    """Add a session to the pool, or return None if it may not or cannot.
-
-    Returns None rather than raising when the pool already has something to
-    work with: a second session that will not fit is a reason to run slower,
-    not a reason to lose a twenty-minute job. The first one is different - with
-    no session at all there is nothing to fall back to.
-    """
-    global _cap
-    with _pool_lock:
-        # `_cap` is what this box turned out to allow, so it only ever lowers
-        # the caller's request.
-        if _cap is not None:
-            limit = min(limit, _cap)
-        if len(_sessions) >= max(1, limit):
-            return None
-        try:
-            session = _load_model()
-        except Exception as exc:  # noqa: BLE001 - any load failure is one failure
-            if not _sessions:
-                raise SynthesisError(f"could not load ZeroTTS: {exc}") from exc
-            logger.warning(
-                "could not build TTS session %d (%s); continuing with %d",
-                len(_sessions) + 1, exc, len(_sessions),
-            )
-            _cap = len(_sessions)
-            return None
-        _sessions.append(session)
-        return session
-
-
-@contextmanager
-def _borrow():
-    """Take a session from the pool for the duration of one synthesis."""
-    try:
-        session = _available.get_nowait()
-    except queue.Empty:
-        # Not enqueued: this borrower is the one that takes it, and the
-        # `finally` below is what puts it in the queue.
-        session = _build_session(max(1, settings.tts_workers))
-        if session is None:
-            try:
-                session = _available.get(timeout=_BORROW_TIMEOUT_S)
-            except queue.Empty:
-                raise SynthesisError(
-                    "waited "
-                    + str(int(_BORROW_TIMEOUT_S))
-                    + "s for a free TTS session and none came back"
-                ) from None
-    try:
-        yield session
-    finally:
-        _available.put(session)
-
-
-# ONNX Runtime takes a priority list, not one name. CUDA keeps the CPU entry
-# behind it on purpose: a handful of ZeroTTS operators have no CUDA kernel, and
-# without a fallback the session refuses to build at all.
-_PROVIDER_LISTS = {
-    "cpu": ["CPUExecutionProvider"],
-    "cuda": ["CUDAExecutionProvider", "CPUExecutionProvider"],
-}
-
-
-def _session_providers(model) -> set:
-    """Which providers the sessions really got, not which were asked for.
-
-    ZeroTTS holds several `InferenceSession`s (text encoder, prefix step, frame
-    decode) rather than one, so this collects every provider in use across all
-    of them. An empty set means introspection failed, which is not the same as
-    "it is on the CPU" and is reported differently below.
-    """
-    got = set()
-    for name in dir(model):
-        try:
-            inner = getattr(model, name)
-        except Exception:  # noqa: BLE001 - a property that raises is not a session
-            continue
-        getter = getattr(inner, "get_providers", None)
-        if not callable(getter):
-            continue
-        try:
-            got.update(getter())
-        except Exception:  # noqa: BLE001 - same
-            continue
-    return got
+    global _model
+    with _model_lock:
+        if _model is None:
+            _model = _load_model()
+        return _model
 
 
 def _load_model():
-    # Imported here rather than at module scope: onnxruntime plus the tokenizer
-    # is seconds of import time that the health endpoint should not wait for.
-    import zerotts
+    # Imported here rather than at module scope: VieNeu pulls in torch, which
+    # is seconds of import time the health endpoint should not wait for.
+    from vieneu import Vieneu
 
-    provider = settings.tts_provider
-    logger.info(
-        "loading ZeroTTS from %s (%d threads, provider=%s)",
-        settings.model_dir,
-        settings.tts_threads,
-        provider,
-    )
-    # HF_HOME is pointed at the bind-mounted cache in config.py, so this
-    # resolves to the copy on disk rather than fetching 900 MB again.
-    model_dir = zerotts.resolve_model_dir()
-    model = zerotts.ZeroTTS(
-        model_dir,
-        providers=_PROVIDER_LISTS[provider],
-        intra_op_num_threads=settings.tts_threads,
-    )
+    device = settings.tts_device
+    if device == "cuda":
+        import torch
 
-    # The point of asking by name. ONNX Runtime accepts CUDA, finds no CUDA
-    # libraries, and builds the session on the CPU without raising - so a GPU
-    # deployment runs at CPU speed and nothing says so. Checked here, at pool
-    # build time, because `_ensure_pool` builds up front: this fails while
-    # there is still nothing to lose, not twenty minutes into a job.
-    if provider == "cuda":
-        in_use = _session_providers(model)
-        if in_use and "CUDAExecutionProvider" not in in_use:
+        # Asked for by name, then checked. A container with no usable GPU would
+        # otherwise run the whole stage on the CPU and report a plausible
+        # number under a GPU heading - the same trap the old ONNX provider
+        # check existed to close.
+        if not torch.cuda.is_available():
             raise SynthesisError(
-                "TTS_PROVIDER=cuda but the sessions got "
-                f"{sorted(in_use)}. This image has no usable CUDA runtime; "
-                "run the CPU image instead of pretending this one is faster."
+                "TTS_DEVICE=cuda but torch sees no CUDA device. This container "
+                "has no usable GPU runtime; run it with TTS_DEVICE=cpu rather "
+                "than pretending this one is faster."
             )
-        if not in_use:
-            # Not fatal: a ZeroTTS release that renames its sessions would trip
-            # this, and refusing to speak over it would be worse than the risk.
-            logger.warning(
-                "could not confirm the execution provider; the timings from "
-                "this run are not evidence that the GPU was used"
-            )
-        else:
-            logger.info("ZeroTTS sessions running on %s", sorted(in_use))
 
-    shipped = tuple(sorted(model.list_voices()))
-    if shipped != SHIPPED_VOICES:
-        # Not fatal — a new voice is good news — but it means the constant this
-        # service validates requests against no longer describes the model.
-        logger.warning(
-            "ZeroTTS ships %s; SHIPPED_VOICES says %s", shipped, SHIPPED_VOICES
+    logger.info(
+        "loading VieNeu v3 Turbo on %s (batch_size=%d)", device, settings.tts_batch_size
+    )
+    try:
+        model = Vieneu(mode="v3turbo", device=device)
+    except Exception as exc:  # noqa: BLE001 - any load failure is one failure
+        raise SynthesisError(f"could not load VieNeu: {exc}") from exc
+
+    if device == "cuda":
+        import torch
+
+        logger.info("VieNeu running on %s", torch.cuda.get_device_name(0))
+
+    rate = int(getattr(model, "sample_rate", timing.SAMPLE_RATE))
+    if rate != timing.SAMPLE_RATE:
+        # Everything downstream - slot fitting, atempo, assembly - is written
+        # in samples at one rate. A model at a different rate would place every
+        # segment at the wrong time rather than merely sound wrong.
+        raise SynthesisError(
+            f"VieNeu returns {rate} Hz but this service assembles at "
+            f"{timing.SAMPLE_RATE} Hz"
         )
     return model
 
 
-def normalise(text: str) -> str:
-    """Expand dates, numbers and abbreviations into words.
+def synthesise(texts: list[str], voice: str) -> list[np.ndarray]:
+    """Speak several texts in one batched pass, in input order.
 
-    `synthesize()` does not do this. Skip it and `31/12/2026` is read as digits
-    in a way you only catch by listening to the finished video.
+    `infer_batch` returns one waveform per input text, whatever the internal
+    chunking did, which is what lets the per-segment timing model survive
+    batching unchanged.
     """
-    import zerotts
-
-    return zerotts.normalize_vi_text(text)
-
-
-def _synthesise(text: str, voice: str) -> np.ndarray:
+    if not texts:
+        return []
+    model = get_model()
     try:
-        with _borrow() as session:
-            audio = session.synthesize(text, voice=voice)
-    except SynthesisError:
-        raise
-    except Exception as exc:  # noqa: BLE001 — any model failure is one failure
-        raise SynthesisError(f"the model failed on {text[:60]!r}: {exc}") from exc
-    # ZeroTTS returns (1, samples). Taking `len()` of that is 1, which reads as
-    # a successful synthesis of nothing.
-    return np.asarray(audio).reshape(-1)
+        wavs = model.infer_batch(texts, voice=voice, batch_size=settings.tts_batch_size)
+    except Exception as exc:  # noqa: BLE001 - any model failure is one failure
+        raise SynthesisError(
+            f"the model failed on a batch of {len(texts)} "
+            f"starting {texts[0][:60]!r}: {exc}"
+        ) from exc
+
+    if len(wavs) != len(texts):
+        # Padding this to length would put silence where speech belongs and
+        # leave the track looking complete. Better to fail the job.
+        raise SynthesisError(
+            f"asked VieNeu for {len(texts)} waveforms and got {len(wavs)}"
+        )
+    return [np.asarray(wav).reshape(-1) for wav in wavs]
 
 
 def build_track(
@@ -291,7 +201,7 @@ def build_track(
     on_progress: Callable[[float], None] | None = None,
 ) -> dict[str, object]:
     """Speak every segment and lay the results on the source's own timeline."""
-    check_voice(voice)
+    voice = check_voice(voice)
 
     transcript = library.load_transcript(video_id)
     segments = transcript.get("segments") or []
@@ -342,18 +252,22 @@ def speak_segments(
     voice: str,
     workspace: Path,
     on_progress: Callable[[float], None] | None = None,
-    workers: int | None = None,
+    group_size: int | None = None,
 ) -> tuple[list[timing.Fit], list[tuple[float, np.ndarray]]]:
-    """Speak every segment, in parallel when there is more than one worker.
+    """Speak every segment in batched groups, reassembled in segment order.
 
-    Segments are independent - each one is synthesised, fitted to its own slot
-    and placed at its own start time - so the only thing concurrency can break
-    is the order they come back in. Everything is therefore collected by index
-    and reassembled in segment order, never in completion order.
+    Segments go to the model in groups rather than all at once. Two batch sizes
+    are in play and they are not the same thing: `batch_size` is how many
+    *chunks* share a forward pass, which is what the speed came from, while
+    `group_size` is how many *segments* one call covers. Grouping bounds how
+    much decoded audio is held at once and is the only place a progress report
+    can happen, since a single call over a whole video would sit silent for
+    minutes. Groups of twice the batch size are the shape the benchmark
+    measured.
     """
-    if workers is None:
-        workers = settings.tts_workers
-    workers = max(1, int(workers))
+    if group_size is None:
+        group_size = settings.tts_batch_size * 2
+    group_size = max(1, int(group_size))
 
     fits: dict[int, timing.Fit] = {}
     spoken: dict[int, np.ndarray] = {}
@@ -379,68 +293,25 @@ def speak_segments(
         plans.append((idx, start_s, end_s, text))
 
     done = len(fits)
-    progress_lock = threading.Lock()
+    if on_progress is not None and done:
+        on_progress(done / len(segments))
 
-    def report() -> None:
-        nonlocal done
-        if on_progress is None:
-            return
-        # Counted, not positional. The old loop reported `(idx + 1) / total`,
-        # which out of order would go backwards - and a progress bar that goes
-        # backwards is worse than none.
-        #
-        # The callback is made inside the lock, not just the counting. Two
-        # threads that compute 0.5 and 0.6 outside it can still deliver them in
-        # the other order, which is the same bug one level down.
-        with progress_lock:
-            done += 1
-            on_progress(done / len(segments))
+    for start in range(0, len(plans), group_size):
+        group = plans[start:start + group_size]
+        audios = synthesise([plan[3] for plan in group], voice)
 
-    def speak_one(plan: tuple[int, float, float, str]):
-        idx, start_s, end_s, text = plan
-        audio = timing.trim_silence(_synthesise(normalise(text), voice))
-        raw_s = audio.size / timing.SAMPLE_RATE
-        fit = timing.plan_fit(
-            idx, start_s, end_s, raw_s, settings.min_ratio, settings.max_ratio
-        )
-        return idx, fit, _fit_audio(audio, fit, workspace)
-
-    if plans and workers > 1:
-        # Never more threads than there are sessions to feed them. When only
-        # one session could be built - the box is out of memory - this drops
-        # back to the serial path below rather than starting three threads
-        # that would only queue behind each other.
-        wanted = min(workers, len(plans))
-        workers = min(wanted, fill_pool(wanted))
-
-    if not plans:
-        pass
-    elif workers == 1:
-        # Kept as a plain loop rather than a one-worker pool: this is the path
-        # the service ran on for every video before the pool existed, and it
-        # should stay exactly as cheap and as easy to read.
-        for plan in plans:
-            idx, fit, audio = speak_one(plan)
+        for (idx, start_s, end_s, _text), audio in zip(group, audios):
+            audio = timing.trim_silence(audio)
+            raw_s = audio.size / timing.SAMPLE_RATE
+            fit = timing.plan_fit(
+                idx, start_s, end_s, raw_s, settings.min_ratio, settings.max_ratio
+            )
             fits[idx] = fit
-            spoken[idx] = audio
-            report()
-    else:
-        pool = ThreadPoolExecutor(max_workers=min(workers, len(plans)),
-                                  thread_name_prefix="tts")
-        futures = {pool.submit(speak_one, plan): plan[0] for plan in plans}
-        try:
-            for future in as_completed(futures):
-                idx, fit, audio = future.result()
-                fits[idx] = fit
-                spoken[idx] = audio
-                report()
-        finally:
-            # Cancel what has not started before shutting down. Without this a
-            # failure waits for every queued segment to be spoken first, which
-            # on a long video is minutes of work nobody will use.
-            for future in futures:
-                future.cancel()
-            pool.shutdown(wait=True)
+            spoken[idx] = _fit_audio(audio, fit, workspace)
+            done += 1
+
+        if on_progress is not None:
+            on_progress(done / len(segments))
 
     if len(fits) != len(segments):
         missing = sorted(set(range(len(segments))) - set(fits))
@@ -462,7 +333,7 @@ def _fit_audio(spoken: np.ndarray, fit: timing.Fit, workspace: Path) -> np.ndarr
     if fit.atempo <= 1.0:
         return pcm
 
-    # Named by segment index, so parallel workers never share a file.
+    # Named by segment index, so nothing is shared between groups.
     source = workspace / f"{fit.idx:04d}.wav"
     stretched = workspace / f"{fit.idx:04d}.fit.wav"
     try:

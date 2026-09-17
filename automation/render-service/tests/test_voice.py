@@ -1,7 +1,7 @@
 """Voicing, against the real running server and the real model.
 
-Slow — synthesis is slower than real time on CPU — so these run on a
-19-second video. The arithmetic that decides where each segment lands is
+Needs the GPU: VieNeu v3 Turbo is a torch model and this exercises the real
+graph. Run on a 19-second video to keep it to seconds. The arithmetic that decides where each segment lands is
 tested exhaustively in test_timing.py without a model behind it; what is left
 for here is whether the whole path produces a track that sits on the picture.
 """
@@ -99,20 +99,9 @@ def test_the_manifest_records_what_was_done_to_every_segment(voiced):
         assert segment["atempo"] >= 1.0
 
 
-def test_the_normaliser_turns_dates_and_numbers_into_words():
-    # `synthesize()` does not do this. Skipped, and a date is read as digits in
-    # a way you only catch by listening to the finished video.
-    import voice
-
-    spoken = voice.normalise("Ngày 31/12/2026 có 1.250.000 người.")
-    assert "31" not in spoken and "1.250.000" not in spoken
-    assert "tháng mười hai" in spoken
-
-
 def test_an_unknown_voice_is_refused_before_a_job_is_created():
-    # ZeroTTS 0.1.2 still cannot build a voice from a reference clip, so a
-    # voice outside the shipped eight is a typo. Failing it now beats failing
-    # it forty segments into a job.
+    # The voice is validated against VieNeu's preset table, aliases included,
+    # before any weights load. Failing now beats failing forty segments in.
     response = httpx.post(
         f"{SERVICE}/voice/jobs",
         json={"video_id": SHORT_VIDEO_ID, "voice": "my-own-voice"},
